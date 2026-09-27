@@ -1,0 +1,410 @@
+:root {
+  --bg: #0f1116;
+  --panel: #161a22;
+  --panel-2: #1d222c;
+  --line: #2a303c;
+  --text: #e6e8ec;
+  --muted: #9097a4;
+  --accent: #ffb020;
+  --accent-ink: #1a1305;
+  --ok: #5fe0bf;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: minmax(340px, 400px) 1fr;
+  height: 100vh;
+}
+
+/* ---- 左：控制區 ---- */
+
+#control {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stage {
+  position: relative;
+  overflow: hidden;
+}
+
+.stage canvas {
+  position: absolute;
+  display: block;
+}
+
+#map {
+  height: 38vh;
+  min-height: 240px;
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: #222;
+}
+
+#map canvas {
+  inset: 0;
+}
+
+#map canvas.overlay {
+  touch-action: none;
+}
+
+.map-hint {
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.map-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(22, 26, 34, 0.85);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 24px;
+}
+
+.sec {
+  border-bottom: 1px solid var(--line);
+}
+
+.sec summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  list-style: none;
+  user-select: none;
+}
+
+.sec summary::-webkit-details-marker {
+  display: none;
+}
+
+.sec summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+
+.sec[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.sec-body {
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ctl .row {
+  display: grid;
+  grid-template-columns: 52px 1fr 92px;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctl label,
+.row2 label {
+  color: var(--muted);
+}
+
+.ctl .row.wide {
+  grid-template-columns: 52px 1fr 124px;
+}
+
+.suffix {
+  display: block;
+  margin: 2px 0 0 60px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.numwrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.unit {
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 18px;
+}
+
+input[type='number'],
+input[type='date'],
+input[type='time'],
+select {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+input[type='number'] {
+  text-align: right;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+button {
+  font: inherit;
+}
+
+.chips button,
+.row2 > button,
+.seg button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.chips button:hover,
+.row2 > button:hover,
+.seg button:hover {
+  border-color: #3a4252;
+}
+
+.chips button.on,
+.seg button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.chips button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.chips.focal button {
+  min-width: 40px;
+  padding: 3px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg {
+  display: inline-flex;
+}
+
+.seg button {
+  border-radius: 0;
+}
+
+.seg button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.seg button:last-child {
+  border-radius: 0 5px 5px 0;
+  border-left: none;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.info {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  display: grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.info b {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.help {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---- 右：取景結果 ---- */
+
+#result {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+}
+
+#viewfinder {
+  flex: 1;
+  min-height: 0;
+}
+
+#viewfinder canvas {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#viewfinder canvas.gl {
+  box-shadow: 0 0 0 1px #333;
+}
+
+#viewfinder canvas.overlay {
+  cursor: grab;
+  touch-action: none;
+}
+
+#viewfinder canvas.overlay.dragging {
+  cursor: grabbing;
+}
+
+#hud {
+  flex: none;
+  padding: 8px 16px 12px;
+  border-top: 1px solid #1c1f26;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  color: #cfd3da;
+}
+
+.hud-main .big {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.hud-main small {
+  font-size: 12px;
+  margin-left: 1px;
+  color: var(--muted);
+}
+
+.hud-101 {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.hud-101 b {
+  color: var(--text);
+  margin-right: 4px;
+}
+
+.hud-101.ok {
+  color: var(--ok);
+}
+
+/* ---- 窄螢幕：上下堆疊（取景結果在上） ---- */
+
+@media (max-width: 860px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    height: auto;
+  }
+
+  #result {
+    order: -1;
+    height: 62vh;
+  }
+
+  #control {
+    border-right: none;
+  }
+
+  #panel {
+    overflow: visible;
+  }
+}
