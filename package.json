@@ -1,0 +1,22 @@
+{
+  "name": "framing-buddy",
+  "version": "1.0.0",
+  "description": "攝影取景規劃：中正紀念堂 × 台北 101",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "dependencies": {
+    "suncalc": "^2.0.2",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "private": true
+}
