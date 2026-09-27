@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import * as SunCalc from 'suncalc';
-import { ORIGIN } from '../geo';
+import type { LatLon } from '../geo';
 import { NIGHT_GLOW, TOWER_GLOW } from './materials';
 
 // 光線：依日期時間計算太陽／月亮位置，驅動天空、日光、陰影、霧氣、夜間燈光與自動曝光。
@@ -201,7 +201,7 @@ export class Environment {
   private moonDisc: ReturnType<typeof celestialDisc>;
   private fogExp: THREE.FogExp2;
   private envGround: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
-  private shadowCenter = new THREE.Vector3(-150, 0, 0);
+  private shadowCenter = new THREE.Vector3(0, 0, 0);
 
   constructor(scene: THREE.Scene) {
     this.sky.scale.setScalar(50000);
@@ -222,10 +222,10 @@ export class Environment {
     this.envGround.position.y = -1;
     this.envScene.add(envSky, this.envGround);
 
-    // 太陽：只在園區範圍內投影陰影
+    // 太陽：陰影範圍跟著相機（約 1 km 見方）
     this.sun.castShadow = true;
     const sc = this.sun.shadow.camera;
-    sc.left = -420; sc.right = 420; sc.top = 420; sc.bottom = -420;
+    sc.left = -520; sc.right = 520; sc.top = 520; sc.bottom = -520;
     sc.near = 10; sc.far = 3000;
     this.sun.shadow.mapSize.set(4096, 4096);
     this.sun.shadow.bias = -0.0004;
@@ -295,6 +295,19 @@ export class Environment {
     return Math.min(this.exposure, 0.55 / Math.max(lum, 1e-5));
   }
 
+  /** 陰影範圍的中心（通常是相機位置） */
+  setFocus(p: THREE.Vector3) {
+    // 以 20 m 為單位移動，避免陰影貼圖因微小位移閃爍
+    const x = Math.round(p.x / 20) * 20;
+    const z = Math.round(p.z / 20) * 20;
+    if (x === this.shadowCenter.x && z === this.shadowCenter.z && Math.abs(p.y - this.shadowCenter.y) < 20) return false;
+    this.shadowCenter.set(x, Math.round(p.y / 20) * 20, z);
+    this.sun.target.position.copy(this.shadowCenter);
+    this.sun.position.copy(this.shadowCenter).addScaledVector(this.sunDir, 1500);
+    this.sun.target.updateMatrixWorld();
+    return true;
+  }
+
   /** 自動曝光（模擬相機測光，保留晝夜差異）；曝光補償由取景器另外疊加 */
   private exposureFor(sunAlt: number, clouds: number): number {
     const brightness = 0.015 + 0.985 * smooth(-10, 25, sunAlt) * (1 - 0.35 * clouds);
@@ -343,11 +356,11 @@ export class Environment {
     return p;
   }
 
-  update(instant: Date, clouds: number, visibilityKm: number) {
-    const s = SunCalc.getPosition(instant, ORIGIN.lat, ORIGIN.lon);
-    const m = SunCalc.getMoonPosition(instant, ORIGIN.lat, ORIGIN.lon);
+  update(instant: Date, clouds: number, visibilityKm: number, o: LatLon) {
+    const s = SunCalc.getPosition(instant, o.lat, o.lon);
+    const m = SunCalc.getMoonPosition(instant, o.lat, o.lon);
     const ill = SunCalc.getMoonIllumination(instant);
-    const times = SunCalc.getTimes(instant, ORIGIN.lat, ORIGIN.lon);
+    const times = SunCalc.getTimes(instant, o.lat, o.lon);
     dirFromAzAlt(s.azimuth, s.altitude, this.sunDir);
     dirFromAzAlt(m.azimuth, m.altitude, this.moonDir);
     this.sunDisc.dir.copy(this.sunDir);

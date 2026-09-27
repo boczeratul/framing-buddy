@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { Batch, balustrade, box, chineseRoof, cylinder, flat, loft, octagonRoof, polygonRing, stairs } from './geometry';
 import { M } from './materials';
 import { buildTrees, type TreeArea, type TreeRow } from './trees';
-import type { MapLabel } from './world';
-import type { ShotState } from '../state';
+import type { MapLabel, Preset } from '../world/types';
+import { DEFAULT_ORIGIN, offsetLatLon } from '../geo';
 
 // 中正紀念堂園區（程序化建模）
 //
 // 建模在「園區座標」(u, v) 中進行：原點＝紀念堂中心，+u 沿主軸指向紀念堂後方（方位 118.3°，東南東），
-// +v 指向主軸右側（方位 208.3°，南南西）。整組模型再旋轉到真實方位。
+// +v 指向主軸右側（方位 208.3°，南南西）。整組模型再旋轉到真實方位，
+// 輸出的「區域座標」以紀念堂中心為原點、+X 東、+Z 南；放進場景時由地標圖層平移到正確位置。
 // 牌樓在西北西端（中山南路），國家戲劇院在廣場南側（+v）、國家音樂廳在北側（−v）。
 //
 // 尺寸來源：中正紀念堂管理處「環境介紹」（堂高 70 m＝台基 14.5 + 堂身 24 + 屋頂 31.5；
@@ -23,11 +24,14 @@ const ROT = (SITE_AXIS_BEARING - 90) * DEG;
 const COS = Math.cos(ROT);
 const SIN = Math.sin(ROT);
 
-export function siteToWorld(u: number, v: number): { x: number; z: number } {
+/** 紀念堂中心的經緯度（區域座標原點） */
+export const CKS_ANCHOR = DEFAULT_ORIGIN;
+
+export function siteToLocal(u: number, v: number): { x: number; z: number } {
   return { x: u * COS - v * SIN, z: u * SIN + v * COS };
 }
 
-export function worldToSite(x: number, z: number): { u: number; v: number } {
+export function localToSite(x: number, z: number): { u: number; v: number } {
   return { u: x * COS + z * SIN, v: -x * SIN + z * COS };
 }
 
@@ -45,16 +49,6 @@ export type Floor =
       y1: number;
       steps: number;
     };
-
-export interface Preset {
-  name: string;
-  x: number;
-  z: number;
-  height?: number;
-  snap?: boolean;
-  aim?: '101' | 'hall';
-  state?: Partial<ShotState>;
-}
 
 type P2 = [number, number];
 
@@ -550,8 +544,8 @@ export function buildCKS() {
   const trees = buildTrees(areas, rows, exclude, inner);
   group.add(trees);
 
-  // 以下輸出轉換成世界座標
-  const W = (u: number, v: number) => siteToWorld(u, v);
+  // 以下輸出為區域座標（紀念堂中心為原點）
+  const W = (u: number, v: number) => siteToLocal(u, v);
   const lab = (text: string, u: number, v: number, minZoom?: number): MapLabel => ({ text, ...W(u, v), minZoom });
   const labels: MapLabel[] = [
     lab('中正紀念堂', 0, -HALL.tiers[0].half - 10),
@@ -564,33 +558,33 @@ export function buildCKS() {
     ...L.gates.map((g) => lab(g.name, g.u, g.v - Math.sign(g.v) * 18, 2.5)),
   ];
 
-  const worldPark = P.map(([pu, pv]) => W(pu, pv));
-  const xs = worldPark.map((p) => p.x);
-  const zs = worldPark.map((p) => p.z);
-  const bounds = { minX: Math.min(...xs) - 80, maxX: Math.max(...xs) + 80, minZ: Math.min(...zs) - 80, maxZ: Math.max(...zs) + 80 };
-
-  return { group, buildings, trees, floors, labels, bounds, hallTop: new THREE.Vector3(0, HALL.top, 0) };
+  return { group, buildings, trees, floors, labels, hallTop: new THREE.Vector3(0, HALL.top, 0) };
 }
 
-// ---- 快速位置（園區座標定義，輸出為世界座標）----
-
-const AX = SITE_AXIS_BEARING;
-const preset = (name: string, u: number, v: number, extra: Omit<Preset, 'name' | 'x' | 'z'> = {}): Preset => ({
-  name,
-  ...siteToWorld(u, v),
-  ...extra,
+/** 園區邊界（經緯度），用來避免 OSM 建物與手工模型重疊 */
+export const CKS_EXCLUSION = L.park.map(([u, v]) => {
+  const p = siteToLocal(u, v);
+  return offsetLatLon(CKS_ANCHOR, p.x, -p.z);
 });
 
+// ---- 快速位置（園區座標定義，輸出為經緯度）----
+
+const AX = SITE_AXIS_BEARING;
+const preset = (name: string, u: number, v: number, extra: Omit<Preset, 'name' | 'group' | 'lat' | 'lon'> = {}): Preset => {
+  const p = siteToLocal(u, v);
+  return { name, group: '中正紀念堂', ...offsetLatLon(CKS_ANCHOR, p.x, -p.z), ...extra };
+};
+
 export const CKS_PRESETS: Preset[] = [
-  preset('自由廣場牌樓下（望向紀念堂）', -462, 0, { aim: 'hall', state: { focal: 50 } }),
-  preset('自由廣場中央', -355, 0, { aim: 'hall', state: { focal: 35 } }),
-  preset('民主大道（紀念堂正面）', -180, 0, { aim: 'hall', state: { focal: 24 } }),
-  preset('紀念堂台階下', -96, 13, { aim: 'hall', state: { focal: 16 } }),
+  preset('自由廣場牌樓下（望向紀念堂）', -462, 0, { aim: 'cks-hall', state: { focal: 50 } }),
+  preset('自由廣場中央', -355, 0, { aim: 'cks-hall', state: { focal: 35 } }),
+  preset('民主大道（紀念堂正面）', -180, 0, { aim: 'cks-hall', state: { focal: 24 } }),
+  preset('紀念堂台階下', -96, 13, { aim: 'cks-hall', state: { focal: 16 } }),
   preset('紀念堂正門平台（望向牌樓）', -33, 0, { state: { azimuth: AX + 180, pitch: -2, focal: 35 } }),
-  preset('紀念堂後方高台（望向台北 101）', 33, 0, { aim: '101', state: { focal: 200 } }),
-  preset('紀念堂東北角高台（101 × 屋簷）', 30, -30, { aim: '101', state: { focal: 70 } }),
-  preset('國家戲劇院前（南側）', -355, 50, { aim: 'hall', state: { focal: 35 } }),
-  preset('國家音樂廳前（北側）', -355, -50, { aim: 'hall', state: { focal: 35 } }),
-  preset('光華池畔', -230, -96, { aim: 'hall', state: { focal: 50 } }),
+  preset('紀念堂後方高台（望向台北 101）', 33, 0, { aim: 'taipei101', state: { focal: 200 } }),
+  preset('紀念堂東北角高台（101 × 屋簷）', 30, -30, { aim: 'taipei101', state: { focal: 70 } }),
+  preset('國家戲劇院前（南側）', -355, 50, { aim: 'cks-hall', state: { focal: 35 } }),
+  preset('國家音樂廳前（北側）', -355, -50, { aim: 'cks-hall', state: { focal: 35 } }),
+  preset('光華池畔', -230, -96, { aim: 'cks-hall', state: { focal: 50 } }),
   preset('空拍：牌樓外 120 m 高', -600, 0, { height: 120, snap: false, state: { azimuth: AX, pitch: -13, focal: 24 } }),
 ];

@@ -1,12 +1,19 @@
 import { ASPECTS, type AspectId, FOCAL_MAX, FOCAL_MIN } from './lens';
+import { DEFAULT_ORIGIN } from './geo';
+import { isValidZone, nowInZone } from './time';
 
 export interface ShotState {
-  /** 場景座標（公尺，+X 東、+Z 南） */
+  /** 場景原點（經緯度）；選擇新地點時移動 */
+  lat0: number;
+  lon0: number;
+  /** 拍攝地點的 IANA 時區 */
+  tz: string;
+  /** 相對原點的場景座標（公尺，+X 東、+Z 南） */
   x: number;
   z: number;
   /** 相機離站立面的高度（公尺） */
   height: number;
-  /** true：站在地面／台階／平台上；false：以地面 0 m 起算（空拍） */
+  /** true：站在地面／屋頂／平台上；false：以原點地面 0 m 起算（空拍） */
   snap: boolean;
   /** 方位角，0°＝北、順時針 */
   azimuth: number;
@@ -18,9 +25,9 @@ export interface ShotState {
   focal: number;
   aspect: AspectId;
   portrait: boolean;
-  /** 台北時間日期 YYYY-MM-DD */
+  /** 當地日期 YYYY-MM-DD */
   date: string;
-  /** 台北時間，當日第幾分鐘 */
+  /** 當地時間，當日第幾分鐘 */
   minutes: number;
   /** 雲量 0–1 */
   clouds: number;
@@ -30,42 +37,29 @@ export interface ShotState {
   ev: number;
   trees: boolean;
   grid: boolean;
+  /** 遠景載入半徑 km */
+  range: number;
+  /** 近景（精細模型）半徑 m */
+  near: number;
+  /** 近景使用 Google 實景 3D 圖磚 */
+  photoreal: boolean;
+  /** 近景套用模擬日照（false：保留照片原始光影） */
+  relight: boolean;
+  /** 資訊列追蹤的目標 id */
+  target: string;
 }
 
 export type StateKey = keyof ShotState;
 type Listener = (s: ShotState, changed: Set<StateKey>) => void;
 
-const TAIPEI_OFFSET_MIN = 8 * 60;
+const TZ0 = 'Asia/Taipei';
+const now = nowInZone(TZ0);
 
-export function taipeiNow(): { date: string; minutes: number } {
-  const t = new Date(Date.now() + TAIPEI_OFFSET_MIN * 60_000);
-  return {
-    date: t.toISOString().slice(0, 10),
-    minutes: t.getUTCHours() * 60 + t.getUTCMinutes(),
-  };
-}
-
-/** 台北時間 → UTC 瞬間 */
-export function toInstant(date: string, minutes: number): Date {
-  const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d, 0, minutes - TAIPEI_OFFSET_MIN));
-}
-
-/** UTC 瞬間 → 台北時間當日分鐘數（跨日時回傳相對 date 的偏移） */
-export function toTaipeiMinutes(instant: Date, date: string): number {
-  const base = toInstant(date, 0).getTime();
-  return Math.round((instant.getTime() - base) / 60_000);
-}
-
-export function formatMinutes(min: number): string {
-  const m = ((Math.round(min) % 1440) + 1440) % 1440;
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-}
-
-const now = taipeiNow();
-
-// 預設：自由廣場中央，望向紀念堂（主軸方位 118.3°）
+// 預設：中正紀念堂自由廣場中央，望向紀念堂（主軸方位 118.3°）
 export const DEFAULT_STATE: ShotState = {
+  lat0: DEFAULT_ORIGIN.lat,
+  lon0: DEFAULT_ORIGIN.lon,
+  tz: TZ0,
   x: -312.6,
   z: -168.3,
   height: 1.6,
@@ -83,22 +77,32 @@ export const DEFAULT_STATE: ShotState = {
   ev: 0,
   trees: true,
   grid: true,
+  range: 6,
+  near: 1000,
+  photoreal: true,
+  relight: true,
+  target: 'taipei101',
 };
 
 const wrap360 = (v: number) => ((v % 360) + 360) % 360;
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 function sanitize(s: ShotState): ShotState {
+  s.lat0 = clamp(s.lat0, -85, 85);
+  s.lon0 = ((((s.lon0 + 180) % 360) + 360) % 360) - 180;
   s.azimuth = wrap360(s.azimuth);
   s.pitch = clamp(s.pitch, -90, 90);
   s.roll = clamp(s.roll, -90, 90);
   s.focal = clamp(s.focal, FOCAL_MIN, FOCAL_MAX);
-  s.height = clamp(s.height, 0, 600);
+  s.height = clamp(s.height, 0, 2000);
   s.clouds = clamp(s.clouds, 0, 1);
-  s.visibility = clamp(s.visibility, 1, 60);
+  s.visibility = clamp(s.visibility, 1, 80);
   s.ev = clamp(s.ev, -5, 5);
   s.minutes = clamp(Math.round(s.minutes), 0, 1439);
+  s.range = clamp(s.range, 1, 20);
+  s.near = clamp(s.near, 200, 3000);
   if (!(s.aspect in ASPECTS)) s.aspect = '3:2';
+  if (!isValidZone(s.tz)) s.tz = TZ0;
   return s;
 }
 
@@ -130,15 +134,18 @@ class Store {
 // ---- 分享連結：把拍攝設定編碼進 URL hash ----
 
 const HASH_KEYS: Record<string, StateKey> = {
+  la: 'lat0', lo: 'lon0', tz: 'tz',
   x: 'x', z: 'z', h: 'height', s: 'snap', az: 'azimuth', p: 'pitch', r: 'roll',
   f: 'focal', ar: 'aspect', o: 'portrait', d: 'date', t: 'minutes', c: 'clouds', v: 'visibility', ev: 'ev',
+  rg: 'range', nr: 'near', pr: 'photoreal', rl: 'relight', tg: 'target',
 };
 
 export function encodeHash(s: ShotState): string {
   const q = new URLSearchParams();
   for (const [short, key] of Object.entries(HASH_KEYS)) {
     const v = s[key];
-    if (typeof v === 'number') q.set(short, String(Math.round(v * 100) / 100));
+    if (key === 'lat0' || key === 'lon0') q.set(short, (v as number).toFixed(6));
+    else if (typeof v === 'number') q.set(short, String(Math.round(v * 100) / 100));
     else if (typeof v === 'boolean') q.set(short, v ? '1' : '0');
     else q.set(short, String(v));
   }
@@ -158,6 +165,7 @@ export function decodeHash(hash: string): Partial<ShotState> {
     } else if (typeof def === 'boolean') out[key] = raw === '1';
     else if (key !== 'date' || /^\d{4}-\d{2}-\d{2}$/.test(raw)) out[key] = raw;
   }
+  // 舊版連結沒有 la/lo：沿用預設原點（中正紀念堂），座標依然正確
   return out as Partial<ShotState>;
 }
 

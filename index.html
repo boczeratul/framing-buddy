@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Framing Buddy · 取景規劃</title>
-    <meta name="description" content="攝影師的拍攝規劃工具：在中正紀念堂任意位置預覽鏡頭焦段、角度與光線，並確認台北 101 是否入鏡。" />
+    <meta name="description" content="攝影師的拍攝規劃工具：在世界任何地點預覽鏡頭焦段、角度、高度與光線，確認地標是否入鏡。" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='8' width='26' height='18' rx='3' fill='%23ffb020'/%3E%3Ccircle cx='16' cy='17' r='6' fill='%23161a22'/%3E%3Crect x='11' y='5' width='10' height='4' rx='1' fill='%23ffb020'/%3E%3C/svg%3E" />
   </head>
   <body>
@@ -13,16 +13,19 @@
         <header class="brand">
           <div>
             <h1>Framing Buddy</h1>
-            <p>中正紀念堂 × 台北 101 取景規劃</p>
+            <p>取景規劃：任何地點的焦段、角度與光線</p>
           </div>
           <div class="seg" id="map-mode" role="tablist" aria-label="地圖模式">
-            <button data-mode="2d" class="on" role="tab">俯視</button>
+            <button data-mode="google" class="on" role="tab">地圖</button>
+            <button data-mode="2d" role="tab">俯視</button>
             <button data-mode="3d" role="tab">立體</button>
           </div>
         </header>
-        <div id="map" class="stage">
+        <div id="search" class="search"></div>
+        <div id="map" class="stage mode-google">
           <canvas class="gl"></canvas>
           <canvas class="overlay"></canvas>
+          <div id="gmap" class="gmap"></div>
           <button class="map-btn" id="map-recenter" title="地圖移到目前位置">⌖</button>
         </div>
         <div class="map-hint" id="map-hint">點一下移動 · 拖曳橘點轉向 · Shift+點一下對準該處 · 滾輪縮放 · 拖曳空白處平移</div>
@@ -32,6 +35,8 @@
         <div id="viewfinder" class="stage">
           <canvas class="gl"></canvas>
           <canvas class="overlay"></canvas>
+          <div id="loading" class="loading" hidden></div>
+          <div id="attribution" class="attribution"></div>
         </div>
         <div id="hud"></div>
       </main>

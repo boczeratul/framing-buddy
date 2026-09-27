@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { World } from '../scene/world';
+import type { World } from '../world/World';
+import type { Target } from '../world/types';
 import { store, type ShotState } from '../state';
 import { fieldOfView, frameSize } from '../lens';
 import { createRenderer, drawTag, EnvMapCache, fitCanvas } from './shared';
@@ -7,11 +8,29 @@ import { createRenderer, drawTag, EnvMapCache, fitCanvas } from './shared';
 const DEG = Math.PI / 180;
 
 export interface VisibilityReport {
-  /** 101 的可見比例（0–1，未進入畫面也會計算：只看是否被遮擋） */
+  target: Target | null;
+  /** 目標的可見比例（0–1，未進入畫面也會計算：只看是否被遮擋） */
   visible: number;
-  /** 101 在畫面中的垂直佔比（0–1，以 NDC 計），不在前方時為 null */
+  /** 目標在畫面中的垂直佔比（0–1，以 NDC 計），不在前方時為 null */
   frameFraction: number | null;
   inFrame: boolean;
+}
+
+/** 依 id 找目標；找不到時選最醒目（高度／距離最大）的一個 */
+export function pickTarget(targets: Target[], id: string, eye: THREE.Vector3): Target | null {
+  const hit = targets.find((t) => t.id === id);
+  if (hit) return hit;
+  let best: Target | null = null;
+  let score = 0;
+  for (const t of targets) {
+    const d = Math.max(50, Math.hypot(t.base.x - eye.x, t.base.z - eye.z));
+    const sc = (t.top.y - t.base.y) / d;
+    if (sc > score) {
+      score = sc;
+      best = t;
+    }
+  }
+  return best;
 }
 
 /** 取景器：以相機實際視角渲染場景，外加構圖輔助線與目標提示 */
@@ -24,7 +43,8 @@ export class Viewfinder {
   private size = { w: 1, h: 1 };
   private dirty = true;
   private raycaster = new THREE.Raycaster();
-  report: VisibilityReport = { visible: 1, frameFraction: null, inFrame: false };
+  report: VisibilityReport = { target: null, visible: 1, frameFraction: null, inFrame: false };
+  private surf = { x: NaN, z: NaN, y: 0, version: -1, snap: false, solid: false };
   onReport?: (r: VisibilityReport) => void;
   private occlusionTimer = 0;
 
@@ -43,8 +63,24 @@ export class Viewfinder {
 
   /** 相機實際位置（含站立面高度） */
   eye(s: ShotState): THREE.Vector3 {
-    const base = s.snap ? this.world.surfaceAt(s.x, s.z) : 0;
-    return new THREE.Vector3(s.x, base + s.height, s.z);
+    return new THREE.Vector3(s.x, (s.snap ? this.surface(s) : 0) + s.height, s.z);
+  }
+
+  /** 站立面：小步移動從目前高度上方 2.5 m 往下找；瞬間移動或模型尚未載入時從高空往下找 */
+  private surface(s: ShotState): number {
+    const c = this.surf;
+    if (c.x === s.x && c.z === s.z && c.version === this.world.version && c.snap) return c.y;
+    const step = Math.hypot(s.x - c.x, s.z - c.z);
+    const walking = c.snap && c.solid && step < 12;
+    const eye = new THREE.Vector3(s.x, c.y, s.z);
+    const r = this.world.surfaceAt(s.x, s.z, walking ? c.y + 2.5 : Infinity, eye);
+    Object.assign(c, { x: s.x, z: s.z, y: r.y, solid: r.solid, version: this.world.version, snap: true });
+    return c.y;
+  }
+
+  /** 原點改變時重設站立面追蹤 */
+  resetSurface() {
+    this.surf.snap = false;
   }
 
   private resize() {
@@ -138,17 +174,27 @@ export class Viewfinder {
       this.drawHorizon();
     }
 
-    const { env, tower101, hall } = this.world;
+    const { env } = this.world;
     const info = env.info;
-    const targets: { label: string; world: THREE.Vector3; color: string }[] = [
-      { label: '台北 101', world: tower101.top.clone().lerp(tower101.base, 0.35), color: '#7fe3c8' },
-      { label: '中正紀念堂', world: hall.top, color: '#9cc3ff' },
-    ];
+    const eye = this.camera.position;
+    const sel = this.report.target;
+    const targets: { label: string; world: THREE.Vector3; color: string; edge: boolean }[] = [];
+    for (const t of this.world.targets()) {
+      const selected = t === sel || t.id === sel?.id;
+      const d = Math.hypot(t.base.x - eye.x, t.base.z - eye.z);
+      const km = d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
+      targets.push({
+        label: selected ? `${t.label} · ${km}` : t.label,
+        world: t.base.clone().lerp(t.top, t.aimAt),
+        color: selected ? '#7fe3c8' : '#9cc3ff',
+        edge: selected,
+      });
+    }
     const far = (dir: THREE.Vector3) => this.camera.position.clone().addScaledVector(dir, 20000);
-    if (info.sunAlt > -8) targets.push({ label: `太陽 ${info.sunAlt.toFixed(1)}°`, world: far(env.sunDir), color: '#ffc861' });
+    if (info.sunAlt > -8) targets.push({ label: `太陽 ${info.sunAlt.toFixed(1)}°`, world: far(env.sunDir), color: '#ffc861', edge: true });
     if (info.moonAlt > -8)
-      targets.push({ label: `月亮 ${Math.round(info.moonFraction * 100)}%`, world: far(env.moonDir), color: '#d9e2ff' });
-    for (const t of targets) this.drawTarget(t.label, t.world, t.color);
+      targets.push({ label: `月亮 ${Math.round(info.moonFraction * 100)}%`, world: far(env.moonDir), color: '#d9e2ff', edge: true });
+    for (const t of targets) this.drawTarget(t.label, t.world, t.color, t.edge);
   }
 
   private drawHorizon() {
@@ -176,7 +222,7 @@ export class Viewfinder {
     ctx.restore();
   }
 
-  private drawTarget(label: string, world: THREE.Vector3, color: string) {
+  private drawTarget(label: string, world: THREE.Vector3, color: string, edge: boolean) {
     const { ctx } = this;
     const { w, h } = this.size;
     const local = world.clone().applyMatrix4(this.camera.matrixWorldInverse);
@@ -194,6 +240,7 @@ export class Viewfinder {
       drawTag(ctx, label, x, y - 18, { color });
       return;
     }
+    if (!edge) return;
     // 畫面外：在邊緣畫箭頭指向目標
     let dx = local.x;
     let dy = local.y;
@@ -230,29 +277,39 @@ export class Viewfinder {
   }
 
   private computeReport() {
-    const { tower101, occluders } = this.world;
     const cam = this.camera;
+    const target = pickTarget(this.world.targets(), store.state.target, cam.position);
+    if (!target) {
+      this.report = { target: null, visible: 0, frameFraction: null, inFrame: false };
+      this.onReport?.(this.report);
+      return;
+    }
+    const occluders = this.world.occluders().filter((o) => o !== target.self);
     const origin = cam.position.clone();
     const samples = 24;
     let visible = 0;
     const p = new THREE.Vector3();
     const dir = new THREE.Vector3();
+    this.raycaster.firstHitOnly = true;
     for (let i = 0; i < samples; i++) {
-      p.lerpVectors(tower101.base, tower101.top, (i + 0.5) / samples);
+      p.lerpVectors(target.base, target.top, (i + 0.5) / samples);
       dir.subVectors(p, origin);
       const dist = dir.length();
       this.raycaster.set(origin, dir.normalize());
-      this.raycaster.far = dist;
+      this.raycaster.near = 0.5;
+      // 射線停在目標外緣，避免打到目標自己（OSM 建物、實景圖磚中的同一棟樓）
+      this.raycaster.far = Math.max(1, dist - (target.radius ?? 0) - 2);
       const hit = this.raycaster.intersectObjects(occluders, true);
       if (!hit.length) visible++;
     }
-    const top = tower101.top.clone().project(cam);
-    const base = tower101.base.clone().project(cam);
-    const topLocal = tower101.top.clone().applyMatrix4(cam.matrixWorldInverse);
+    const top = target.top.clone().project(cam);
+    const base = target.base.clone().project(cam);
+    const topLocal = target.top.clone().applyMatrix4(cam.matrixWorldInverse);
     const inFront = topLocal.z < 0;
     const inFrame =
       inFront && Math.abs(top.x) <= 1.05 && Math.min(top.y, base.y) <= 1 && Math.max(top.y, base.y) >= -1;
     this.report = {
+      target,
       visible: visible / samples,
       frameFraction: inFront ? Math.abs(top.y - base.y) / 2 : null,
       inFrame,

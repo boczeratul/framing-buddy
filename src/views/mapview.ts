@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { World } from '../scene/world';
+import type { World } from '../world/World';
+import type { Target } from '../world/types';
 import { store, type ShotState } from '../state';
 import { fieldOfView, frameSize } from '../lens';
 import { bearing } from '../geo';
@@ -8,7 +9,7 @@ import { createRenderer, drawTag, EnvMapCache, fitCanvas } from './shared';
 
 const DEG = Math.PI / 180;
 
-type Mode = '2d' | '3d';
+type Mode = '2d' | '3d' | 'off';
 
 /**
  * 位置規劃圖：
@@ -24,7 +25,9 @@ export class MapView {
   private ctx!: CanvasRenderingContext2D;
   private envCache: EnvMapCache;
   private size = { w: 1, h: 1 };
-  private center = { x: -170, z: -80 };
+  private center = { x: -312, z: -168 };
+  /** 資訊列追蹤的目標（由主程式同步） */
+  target: Target | null = null;
   private mpp = 1.9; // 每像素公尺數
   private dirty = true;
   private frustum = new THREE.Group();
@@ -58,10 +61,16 @@ export class MapView {
     canvas.addEventListener('dblclick', (e) => this.relocate3D(e));
   }
 
+  /** 目前使用中的 Three.js 相機（Google 地圖模式時為 null） */
+  activeCamera(): THREE.Camera | null {
+    return this.mode === '2d' ? this.ortho : this.mode === '3d' ? this.persp : null;
+  }
+
   setMode(mode: Mode) {
     this.mode = mode;
     this.controls.enabled = mode === '3d';
     this.overlay.style.pointerEvents = mode === '2d' ? 'auto' : 'none';
+    if (mode === '2d') this.recenter();
     if (mode === '3d') {
       const s = store.state;
       const back = new THREE.Vector3(-Math.sin(s.azimuth * DEG), 0, Math.cos(s.azimuth * DEG));
@@ -155,7 +164,7 @@ export class MapView {
   }
 
   render() {
-    if (!this.dirty) return;
+    if (!this.dirty || this.mode === 'off') return;
     this.dirty = false;
     const { scene, env } = this.world;
     scene.environment = this.envCache.get(env);
@@ -194,7 +203,8 @@ export class MapView {
     const { ctx } = this;
     const { w, h } = this.size;
     const s = store.state;
-    const { env, tower101, labels } = this.world;
+    const { env } = this.world;
+    const labels = this.world.labels();
     ctx.clearRect(0, 0, w, h);
 
     // 建築標籤
@@ -230,10 +240,13 @@ export class MapView {
     ray(info.sunAz, '#ffbf3c', info.sunAlt > 0 ? [] : [4, 5], `☀ ${info.sunAz.toFixed(0)}°`);
     if (info.moonAlt > -2) ray(info.moonAz, '#c9d6ff', [2, 4], `☾ ${info.moonAz.toFixed(0)}°`);
 
-    // 往 101 的方向線
-    const b101 = bearing(s.x, s.z, tower101.base.x, tower101.base.z);
-    const d101 = Math.hypot(tower101.base.x - s.x, tower101.base.z - s.z);
-    ray(b101, '#5fe0bf', [8, 6], `101 ${(d101 / 1000).toFixed(2)} km`);
+    // 往追蹤目標的方向線
+    const tg = this.target;
+    if (tg) {
+      const b = bearing(s.x, s.z, tg.base.x, tg.base.z);
+      const d = Math.hypot(tg.base.x - s.x, tg.base.z - s.z);
+      ray(b, '#5fe0bf', [8, 6], `${tg.label} ${d >= 1000 ? `${(d / 1000).toFixed(2)} km` : `${Math.round(d)} m`}`);
+    }
 
     // 視野扇形
     const fov = fieldOfView(s.focal, frameSize(s.aspect, s.portrait));
@@ -405,7 +418,7 @@ export class MapView {
     const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     const rc = new THREE.Raycaster();
     rc.setFromCamera(ndc, this.persp);
-    const hit = rc.intersectObjects([...this.world.occluders, this.world.ground], true)[0];
+    const hit = rc.intersectObjects([...this.world.occluders(), this.world.terrain.group], true)[0];
     if (hit) store.set({ x: hit.point.x, z: hit.point.z });
   }
 }
