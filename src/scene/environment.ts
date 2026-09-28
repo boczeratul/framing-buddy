@@ -283,18 +283,6 @@ export class Environment {
     scene.add(this.group);
   }
 
-  /**
-   * 中央重點測光：鏡頭對著明亮天空（例如逆光、夕陽）時降低曝光，前景自然成為剪影。
-   * 回傳此視角下建議的曝光值（不含曝光補償）。
-   */
-  meter(viewDir: THREE.Vector3): number {
-    if (viewDir.y < -0.02) return this.exposure;
-    const d = viewDir.clone();
-    d.y = Math.max(d.y, 0.01);
-    const lum = luminance(skyRadiance(d.normalize(), this.sunDir, this.sky.material.uniforms));
-    return Math.min(this.exposure, 0.55 / Math.max(lum, 1e-5));
-  }
-
   /** 陰影範圍的中心（通常是相機位置） */
   setFocus(p: THREE.Vector3) {
     // 以 20 m 為單位移動，避免陰影貼圖因微小位移閃爍

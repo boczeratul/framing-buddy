@@ -355,9 +355,9 @@ export function dougongBand(path: THREE.Vector2[], y: number, spacing: number, s
     const len = a.distanceTo(b);
     const count = Math.max(1, Math.round(len / spacing));
     const ang = Math.atan2(-(b.y - a.y), b.x - a.x);
-    // 向外法線（逆時針路徑的右手側）
-    const ox = (b.y - a.y) / len;
-    const oz = -(b.x - a.x) / len;
+    // 向外法線（從上方看逆時針的路徑，外側＝局部 +Z 經 rotateY(ang) 後的方向）
+    const ox = Math.sin(ang);
+    const oz = Math.cos(ang);
     for (let k = 0; k < count; k++) {
       const t = (k + 0.5) / count;
       const px = a.x + (b.x - a.x) * t;
@@ -595,4 +595,39 @@ export function insetOutline(pts: THREE.Vector2[], dw: number, dh: number): THRE
   const sx = (w - 2 * dw) / w;
   const sy = (h - dh) / h;
   return pts.map((p) => new THREE.Vector2(p.x * sx, p.y * sy + 0.001));
+}
+
+/** 兩點之間的方柱 */
+export function beamBetween(p0: THREE.Vector3, p1: THREE.Vector3, t: number, t2 = t): THREE.BufferGeometry {
+  const len = p0.distanceTo(p1);
+  const g = new THREE.BoxGeometry(t, t2, len);
+  const m = new THREE.Matrix4().lookAt(p0, p1, Math.abs(p1.y - p0.y) > len * 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0));
+  g.applyMatrix4(m);
+  g.translate((p0.x + p1.x) / 2, (p0.y + p1.y) / 2, (p0.z + p1.z) / 2);
+  return g;
+}
+
+/** 沿 3D 折線（可傾斜，例如台階兩側）的欄杆：望柱＋扶手＋欄板 */
+export function railAlong(points: THREE.Vector3[], height = 1.0, spacing = 2.0): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const up = new THREE.Vector3(0, height, 0);
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const c = points[i + 1];
+    const n = Math.max(1, Math.round(a.distanceTo(c) / spacing));
+    for (let k = 0; k <= n; k++) {
+      const p = a.clone().lerp(c, k / n);
+      parts.push(box(0.28, height, 0.28, p.x, p.y, p.z));
+      const head = new THREE.CylinderGeometry(0.1, 0.18, 0.3, 8);
+      head.translate(p.x, p.y + height + 0.15, p.z);
+      parts.push(head);
+      if (k < n) {
+        const q = a.clone().lerp(c, (k + 1) / n);
+        parts.push(beamBetween(p.clone().add(up).setY(p.y + height - 0.1), q.clone().setY(q.y + height - 0.1), 0.22, 0.14));
+        parts.push(beamBetween(p.clone().setY(p.y + height * 0.45), q.clone().setY(q.y + height * 0.45), 0.1, height * 0.6));
+      }
+    }
+    parts.push(beamBetween(a.clone().setY(a.y + 0.08), c.clone().setY(c.y + 0.08), 0.36, 0.16));
+  }
+  return merge(parts);
 }

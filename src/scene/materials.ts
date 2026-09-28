@@ -297,14 +297,14 @@ export const M = {
 
 /** 夜間會打燈／發光的材質：環境模組依「夜晚程度」調整 emissiveIntensity */
 export const NIGHT_GLOW: { material: THREE.MeshStandardMaterial; color: number; intensity: number }[] = [
-  { material: M.marble, color: 0xfff1d6, intensity: 0.22 },
-  { material: M.marbleShade, color: 0xffe8c4, intensity: 0.16 },
+  { material: M.marble, color: 0xfff1d6, intensity: 0.055 },
+  { material: M.marbleShade, color: 0xffe8c4, intensity: 0.045 },
   { material: M.blueTile, color: 0x3b6fd8, intensity: 0.12 },
   { material: M.yellowTile, color: 0xffb54a, intensity: 0.18 },
   { material: M.red, color: 0xff5a3c, intensity: 0.14 },
   { material: M.gold, color: 0xffd27a, intensity: 0.3 },
-  { material: M.marbleWall, color: 0xfff1d6, intensity: 0.22 },
-  { material: M.eaveWhite, color: 0xfff1d6, intensity: 0.2 },
+  { material: M.marbleWall, color: 0xfff1d6, intensity: 0.055 },
+  { material: M.eaveWhite, color: 0xfff1d6, intensity: 0.07 },
   { material: M.caihua, color: 0xffe0b0, intensity: 0.12 },
   { material: M.finial, color: 0xffb060, intensity: 0.35 },
   // 哈爾格林姆教堂：夜間投光（塔尖打燈較亮）、窗內透出燈光

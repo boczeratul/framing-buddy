@@ -261,6 +261,7 @@ function updateHud(s: ShotState) {
       <span>鏡頭 海拔 ${(eye.y + world.terrain.originElevation).toFixed(1)} m</span>
       <span>${s.date} ${formatMinutes(s.minutes)}（${offsetLabel(s.tz, instantOf(s))}）</span>
       <span>☀ ${info.sunAz.toFixed(0)}° / ${info.sunAlt.toFixed(1)}°</span>
+      <span>測光：多重（偏重中央）${s.ev ? ` ${s.ev > 0 ? '+' : ''}${s.ev.toFixed(1)} EV` : ''}</span>
     </div>
     <div class="hud-101">${targetLine}</div>`;
 }

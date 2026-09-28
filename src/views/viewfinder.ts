@@ -4,6 +4,7 @@ import type { Target } from '../world/types';
 import { store, type ShotState } from '../state';
 import { fieldOfView, frameSize } from '../lens';
 import { createRenderer, drawTag, EnvMapCache, fitCanvas } from './shared';
+import { MultiMeter } from './metering';
 
 const DEG = Math.PI / 180;
 
@@ -47,6 +48,9 @@ export class Viewfinder {
   private surf = { x: NaN, z: NaN, y: 0, version: -1, snap: false, solid: false };
   onReport?: (r: VisibilityReport) => void;
   private occlusionTimer = 0;
+  private meter = new MultiMeter();
+  /** 目前測光結果（不含曝光補償） */
+  meteredExposure = 1;
 
   constructor(private stage: HTMLElement, private world: World) {
     const canvas = stage.querySelector<HTMLCanvasElement>('canvas.gl')!;
@@ -127,11 +131,17 @@ export class Viewfinder {
     this.dirty = false;
     const { scene, env } = this.world;
     scene.environment = this.envCache.get(env);
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-    const exposure = env.meter(forward) * Math.pow(2, store.state.ev);
+    // 多重測光（偏重中央）：先以同一相機渲染測光小圖；陰影貼圖在這一趟更新，正式渲染直接沿用
+    env.setFogForView(store.state.azimuth, this.meteredExposure * Math.pow(2, store.state.ev));
+    const metered = this.meter.measure(this.renderer, scene, this.camera);
+    // 夜間仍保留夜景感：測光結果限制在環境估算的 1/8 到 1.4 倍之間
+    this.meteredExposure = metered === null ? env.exposure : Math.min(env.exposure * 1.4, Math.max(env.exposure / 8, metered));
+    const exposure = this.meteredExposure * Math.pow(2, store.state.ev);
     this.renderer.toneMappingExposure = exposure;
     env.setFogForView(store.state.azimuth, exposure);
+    this.renderer.shadowMap.autoUpdate = metered === null;
     this.renderer.render(scene, this.camera);
+    this.renderer.shadowMap.autoUpdate = true;
     this.drawOverlay();
   }
 
