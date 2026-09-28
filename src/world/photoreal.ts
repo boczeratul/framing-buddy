@@ -53,6 +53,11 @@ export class PhotorealLayer {
   /** 地形高程（場景座標）；有的話用來把實景模型的地面對齊高程資料 */
   private groundRef: ((x: number, z: number) => number) | null = null;
   private groundReady = false;
+  private calibRuns = 0;
+  private calibStable = 0;
+  private calibAt = 0;
+  /** 校正結果改變時遞增（站立面需要重新判定） */
+  calibrationEpoch = 0;
 
   constructor(apiKey: string, origin: LatLon) {
     this.root.name = 'photoreal';
@@ -63,8 +68,10 @@ export class PhotorealLayer {
     this.root.rotation.y = Math.PI;
     const tiles = new TilesRenderer();
     tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
-    // 遠景全靠 Google 模型：比建議值（20 px）更精細一些
+    // 遠景全靠 Google 模型：比建議值（20 px）更精細一些；很遠的圖磚（數十公里外）再逐漸放寬
     tiles.errorTarget = 12;
+    tiles.errorFalloff = 6;
+    tiles.errorFalloffDensity = 2.5e-5;
     const draco = new DRACOLoader().setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
     tiles.registerPlugin(new TileCompressionPlugin());
@@ -101,6 +108,8 @@ export class PhotorealLayer {
     this.root.position.y = 0;
     this.calibrated = false;
     this.groundReady = false;
+    this.calibRuns = 0;
+    this.calibStable = 0;
     this.changed();
   }
 
@@ -109,6 +118,8 @@ export class PhotorealLayer {
     this.groundRef = fn;
     this.groundReady = true;
     this.calibrated = false;
+    this.calibRuns = 0;
+    this.calibStable = 0;
   }
 
   setCameras(list: { camera: THREE.Camera; renderer: THREE.WebGLRenderer }[]) {
@@ -129,7 +140,12 @@ export class PhotorealLayer {
     this.mask.sphere.center.copy(local);
     this.mask.sphere.radius = range * 1.1;
     this.tiles.update();
-    if (!this.calibrated) this.calibrate();
+    // 圖磚由粗到細陸續載入：校正反覆進行，直到連續三次結果穩定為止
+    const now = performance.now();
+    if (this.calibStable < 3 && this.calibRuns < 40 && now - this.calibAt > 1200) {
+      this.calibAt = now;
+      this.calibrate();
+    }
   }
 
   /**
@@ -140,6 +156,7 @@ export class PhotorealLayer {
    */
   private calibrate() {
     if (this.tiles.visibleTiles.size < 25 || !this.groundReady) return;
+    this.calibRuns++;
     const rc = new THREE.Raycaster();
     rc.firstHitOnly = true;
     const diffs: number[] = [];
@@ -157,9 +174,15 @@ export class PhotorealLayer {
     if (diffs.length < N) return;
     diffs.sort((a, b) => a - b);
     const offset = this.groundRef ? diffs[Math.floor(diffs.length * 0.2)] : diffs[0];
+    if (Math.abs(offset) < 0.3 && this.calibrated) {
+      this.calibStable++;
+      return;
+    }
+    this.calibStable = 0;
     this.root.position.y -= offset;
     this.root.updateMatrixWorld(true);
     this.calibrated = true;
+    this.calibrationEpoch++;
     this.changed();
   }
 

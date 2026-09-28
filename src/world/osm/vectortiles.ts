@@ -29,7 +29,7 @@ function poiScore(name: string, cls: string, sub: string): number {
 
 let template: Promise<string> | null = null;
 
-function tileTemplate(): Promise<string> {
+export function tileTemplate(): Promise<string> {
   template ??= fetch(TILEJSON)
     .then((r) => r.json())
     .then((j: { tiles: string[] }) => j.tiles[0])

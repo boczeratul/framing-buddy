@@ -29,11 +29,44 @@ skyShader.fragmentShader = skyShader.fragmentShader.replace(
   gl_FragColor = vec4( texColor, 1.0 );`,
 );
 
-// 霧改成物理正確的指數衰減（three 內建 FogExp2 為平方指數）
-THREE.ShaderChunk.fog_fragment = THREE.ShaderChunk.fog_fragment.replace(
-  'fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );',
-  'fogFactor = 1.0 - exp( - fogDensity * vFogDepth );',
-);
+// 霧：物理正確的指數衰減（three 內建 FogExp2 為平方指數），並依高度變化——
+// 霾集中在低空，密度隨高度以尺度高度 H 指數遞減。沿視線積分後的衰減係數為
+//   τ = density × 距離 × H(1 − e^(−Δy/H)) / Δy   （Δy＝目標與相機的高度差）
+// 能見度滑桿因此代表「相機所在高度的水平能見度」；遠方高山的山頂會比山腳清楚。
+const FOG_SCALE_HEIGHT = 1400;
+THREE.ShaderChunk.fog_pars_vertex = /* glsl */ `
+#ifdef USE_FOG
+  varying float vFogDepth;
+  varying float vFogDy;
+#endif`;
+THREE.ShaderChunk.fog_vertex = /* glsl */ `
+#ifdef USE_FOG
+  vFogDepth = length( mvPosition.xyz );
+  vFogDy = dot( viewMatrix[ 1 ].xyz, mvPosition.xyz );
+#endif`;
+THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
+#ifdef USE_FOG
+  uniform vec3 fogColor;
+  varying float vFogDepth;
+  varying float vFogDy;
+  #ifdef FOG_EXP2
+    uniform float fogDensity;
+  #else
+    uniform float fogNear;
+    uniform float fogFar;
+  #endif
+#endif`;
+THREE.ShaderChunk.fog_fragment = /* glsl */ `
+#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogH = ${FOG_SCALE_HEIGHT.toFixed(1)};
+    float fogK = abs( vFogDy ) < 1.0 ? 1.0 : fogH * ( 1.0 - exp( - vFogDy / fogH ) ) / vFogDy;
+    float fogFactor = 1.0 - exp( - fogDensity * vFogDepth * min( fogK, 8.0 ) );
+  #else
+    float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+  #endif
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif`;
 
 export function dirFromAzAlt(azDeg: number, altDeg: number, out = new THREE.Vector3()): THREE.Vector3 {
   const az = azDeg * DEG;
@@ -188,6 +221,11 @@ export class Environment {
   readonly moonLight = new THREE.DirectionalLight(0xaec4ff, 0);
   readonly hemi = new THREE.HemisphereLight(0xbfd4ff, 0x6b6250, 0.3);
   readonly sunDir = new THREE.Vector3();
+  /**
+   * 給遠方高山用的日照參數：未經大氣衰減的日光強度，以及場景太陽（觀測者所在海拔）已提供的強度。
+   * 山體依自身海拔重新計算大氣穿透與地平線下沉，補上兩者的差（赤富士、觀測者日落後山頂仍有餘暉）。
+   */
+  readonly sunUniforms = { uSunI0: { value: 0 }, uSunScene: { value: 0 } };
   readonly moonDir = new THREE.Vector3();
   /** 供 PMREM 產生環境光照的獨立天空場景 */
   readonly envScene = new THREE.Scene();
@@ -377,6 +415,8 @@ export class Environment {
     this.sun.intensity = 4.3 * trans * above * cloudDim;
     kelvin(1900 + 3700 * smooth(0, 35, alt), this.sun.color);
     this.sun.visible = above > 0.001;
+    this.sunUniforms.uSunI0.value = 4.3 * cloudDim;
+    this.sunUniforms.uSunScene.value = this.sun.visible ? this.sun.intensity : 0;
     this.sun.position.copy(this.shadowCenter).addScaledVector(this.sunDir, 1500);
 
     // 環境光地面：約 20% 反照率的城市地面，亮度隨日照

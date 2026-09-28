@@ -328,7 +328,8 @@ export function buildPanel(root: HTMLElement, act: PanelActions) {
       get: (s) => s.clouds, set: (v) => ({ clouds: v }),
     });
     slider(sec, '能見度', {
-      min: 2, max: 60, step: 0.5, unit: 'km',
+      min: 2, max: 150, step: 1, unit: 'km',
+      suffix: () => '相機所在高度的水平能見度；霾集中在低空，高山山頂會比山腳清楚',
       get: (s) => s.visibility, set: (v) => ({ visibility: v }),
     });
     slider(sec, '曝光補償', {
@@ -343,7 +344,7 @@ export function buildPanel(root: HTMLElement, act: PanelActions) {
     slider(sec, '遠景', {
       min: 1, max: 20, step: 0.5, unit: 'km', commit: true,
       get: (s) => s.range, set: (v) => ({ range: v }),
-      suffix: () => '可視範圍：此距離內的高樓、高塔與地形（OpenStreetMap＋Google 高程）',
+      suffix: () => '此距離內有名稱的高樓、高塔（沒有 Google 時也決定 OSM 高樓的載入範圍）。地形、遠山與 Google 模型一律載入到約 90 km 的地平線',
     });
     slider(sec, '近景', {
       min: 200, max: 3000, step: 50, unit: 'm', digits: 0, commit: true,

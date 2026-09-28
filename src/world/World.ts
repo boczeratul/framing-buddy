@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
-import { getOrigin, setOrigin, toLatLon, type LatLon } from '../geo';
+import { curvatureDrop, getOrigin, setOrigin, toLatLon, type LatLon } from '../geo';
 import { googleKey } from '../config';
 import { Environment } from '../scene/environment';
 import { FAR_RING, NEAR_RING, ringEye } from '../scene/ringmask';
@@ -8,7 +8,10 @@ import { LandmarkLayer } from './landmarks';
 import { OsmLayer, type OsmStatus } from './osm/OsmLayer';
 import { NamedTargets } from './osm/named';
 import { PhotorealLayer } from './photoreal';
-import { TerrainLayer } from './terrain';
+import { HORIZON, TerrainLayer } from './terrain';
+import { PeakTargets } from './peaks';
+import { MountainLayer } from './mountains';
+import { setMasks } from '../scene/regionmask';
 import type { MapLabel, Target } from './types';
 
 // 大量網格的射線偵測（遮擋判定、站立面）改用 BVH 加速。
@@ -58,8 +61,10 @@ export class World {
   readonly osm: OsmLayer;
   readonly photoreal: PhotorealLayer | null;
   readonly named = new NamedTargets();
+  readonly peaks = new PeakTargets();
+  readonly mountains: MountainLayer;
   private namedCache: Target[] = [];
-  private namedVersion = -1;
+  private namedVersion = '';
   /** 內容改變時遞增，視圖據此重新渲染 */
   version = 0;
   private terrainState: WorldStatus['terrain'] = 'loading';
@@ -79,6 +84,8 @@ export class World {
     this.scene.add(this.terrain.group);
 
     const heightAt = (x: number, z: number) => this.terrain.heightAt(x, z);
+    this.mountains = new MountainLayer(this.env.sunDir, this.env.sunUniforms);
+    this.scene.add(this.mountains.group);
     this.landmarks = new LandmarkLayer();
     this.scene.add(this.landmarks.group);
 
@@ -105,7 +112,7 @@ export class World {
     this.terrainState = 'loading';
     this.osm.rebase();
     this.photoreal?.setOrigin(origin);
-    const ok = await this.terrain.load(rangeM);
+    const ok = await this.terrain.load();
     if (token !== this.rebaseToken) return;
     this.terrainState = ok ? 'ready' : 'flat';
     if (!(import.meta.env.DEV && location.search.includes('nolm'))) this.landmarks.update(origin, this.landmarkPolicy(), true);
@@ -114,11 +121,27 @@ export class World {
     this.rebasing = false;
     this.version++;
     this.named.load(origin, rangeM, (p) => this.landmarks.excluded(p)).then(() => this.version++);
+    // 地平線內的主要山峰（例如從河口湖、山中湖望向富士山）
+    this.peaks
+      .load(origin, HORIZON, this.terrain.originElevation)
+      .then(() => this.mountains.load(this.peaks.list, origin, this.terrain.originElevation))
+      .then(() => {
+        if (token !== this.rebaseToken) return;
+        this.terrain.setSinks(this.mountains.sinks());
+        this.version++;
+      });
   }
 
-  /** 可視範圍改變時地形要涵蓋更大範圍 */
-  async reloadTerrain(rangeM: number) {
-    await this.rebase(getOrigin(), rangeM);
+  /** 遠景範圍改變：重新查詢範圍內有名稱的高樓（地形與 Google 模型本來就載入到地平線） */
+  setRange(rangeM: number) {
+    this.named.load(getOrigin(), rangeM, (p) => this.landmarks.excluded(p)).then(() => this.version++);
+  }
+
+  /** 日期改變時更新雪線 */
+  setSeason(month: number) {
+    this.mountains.setSeason(month, getOrigin().lat);
+    this.terrain.setSeason(month, getOrigin().lat);
+    this.version++;
   }
 
   get photorealActive(): boolean {
@@ -163,6 +186,8 @@ export class World {
     // 開發用：網址加 ?nolm 可暫停自建模型，直接看 Google 模型
     const noLandmarks = import.meta.env.DEV && location.search.includes('nolm');
     if (this.terrain.ready && !this.rebasing && !noLandmarks) this.landmarks.update(this.eyeLL, this.landmarkPolicy());
+    // Google 模型挖空：近景自建地標＋精細山體（最多 4 塊）
+    setMasks(google ? [...this.mountains.masks(), ...this.landmarks.masks] : []);
 
     this.osm.farMode = google ? 'names' : 'mesh';
     this.osm.nearEnabled = !google;
@@ -173,12 +198,13 @@ export class World {
       this.photoreal.root.visible = google;
       if (google) {
         this.photoreal.setCameras(cameras);
-        this.photoreal.update(v.eye, v.range);
+        // Google 模型一律載入到地平線：遠方的山（例如富士山）也要看得到
+        this.photoreal.update(v.eye, HORIZON);
       }
     }
     if (this.env.setFocus(v.eye)) this.version++;
 
-    const versions = `${this.osm.version}|${this.landmarks.version}|${google}`;
+    const versions = `${this.osm.version}|${this.landmarks.version}|${this.mountains.version}|${google}`;
     if (versions !== this.lastVersions) {
       this.lastVersions = versions;
       this.version++;
@@ -196,15 +222,19 @@ export class World {
 
   /** 會遮擋視線的物件 */
   occluders(): THREE.Object3D[] {
-    const list = [...this.landmarks.solids(), ...this.osm.solids];
+    const list = [...this.landmarks.solids(), ...this.osm.solids, ...this.mountains.solids()];
     if (this.photorealOn && this.photoreal) list.push(this.photoreal.occluder);
     return list;
   }
 
   targets(): Target[] {
-    if (this.named.version !== this.namedVersion) {
-      this.namedVersion = this.named.version;
-      this.namedCache = this.named.targets((x, z) => this.terrain.heightAt(x, z));
+    const versions = `${this.named.version}|${this.peaks.version}`;
+    if (versions !== this.namedVersion) {
+      this.namedVersion = versions;
+      this.namedCache = [
+        ...this.peaks.targets(this.terrain.originElevation, (x, z) => curvatureDrop(Math.hypot(x, z))),
+        ...this.named.targets((x, z) => this.terrain.heightAt(x, z)),
+      ];
     }
     const out = this.landmarks.targets(this.eyeLL, this.range, (x, z) => this.terrain.heightAt(x, z));
     const seen = new Set(out.map((t) => t.label));
@@ -245,8 +275,26 @@ export class World {
     }
     if (this.photorealOn && this.photoreal) {
       if (!this.photoreal.calibrated) return { y: terrain, solid: false };
-      const hit = this.photoreal.raycast(rc)[0];
-      return hit ? { y: hit.point.y, solid: true } : { y: terrain, solid: false };
+      if (Number.isFinite(fromY)) {
+        const hit = this.photoreal.raycast(rc)[0];
+        return hit ? { y: hit.point.y, solid: true } : { y: terrain, solid: false };
+      }
+      // 瞬間移動：實景模型是 2.5D 表面（樹冠、屋頂下方沒有地面），而 DEM 在陡坡上可能差十幾公尺，
+      // 所以一律站在實景表面上，避免相機落到模型內部。若該點是樹冠，改找周圍 5 m 內樹冠間隙露出的地面。
+      const top = (px: number, pz: number) => {
+        rc.set(new THREE.Vector3(px, start, pz), new THREE.Vector3(0, -1, 0));
+        return this.photoreal!.raycast(rc)[0]?.point.y ?? null;
+      };
+      const here = top(x, z);
+      if (here === null) return { y: terrain, solid: false };
+      let low = here;
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2;
+        const y = top(x + Math.cos(a) * 5, z + Math.sin(a) * 5);
+        if (y !== null) low = Math.min(low, y);
+      }
+      rc.set(new THREE.Vector3(x, start, z), new THREE.Vector3(0, -1, 0));
+      return { y: here - low > 6 && low > terrain - 25 ? low : here, solid: true };
     }
     let y = terrain;
     let solid = this.terrain.ready;

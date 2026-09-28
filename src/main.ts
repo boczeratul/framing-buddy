@@ -74,7 +74,7 @@ let pendingAim: { id: string; until: number } | null = null;
 
 function applyPreset(p: Preset) {
   goTo({ lat: p.lat, lon: p.lon }, { height: p.height ?? 1.6, snap: p.snap ?? true, ...(p.state ?? {}) });
-  if (p.aim) pendingAim = { id: p.aim, until: performance.now() + 25000 };
+  if (p.aim) pendingAim = { id: p.aim, until: performance.now() + 45000 };
   gmap?.panTo({ lat: p.lat, lon: p.lon });
 }
 
@@ -196,8 +196,9 @@ store.subscribe((s, changed) => {
     }
   } else if (changed.has('range')) {
     clearTimeout(rangeTimer);
-    rangeTimer = window.setTimeout(() => world.reloadTerrain(store.state.range * 1000), 400);
+    rangeTimer = window.setTimeout(() => world.setRange(store.state.range * 1000), 400);
   }
+  if (changed.has('date') || changed.has('lat0')) world.setSeason(Number(s.date.slice(5, 7)));
   viewfinder.apply(s, changed as Set<string>);
   map.apply(s);
   if ([...changed].some((k) => ENV_KEYS.has(k) || k === 'trees' || k === 'relight' || k === 'photoreal')) {
@@ -241,7 +242,11 @@ function updateHud(s: ShotState) {
     const b = bearing(s.x, s.z, t.base.x, t.base.z);
     const vis = Math.round(report.visible * 100);
     let status: string;
-    if (!report.inFrame) status = '不在畫面內';
+    if (t.kind === 'peak') {
+      if (!report.inFrame) status = '山頂不在畫面內';
+      else if (vis >= 50) status = '山頂入鏡、無遮擋';
+      else status = '山頂在畫面方向上，但被地形或建物擋住';
+    } else if (!report.inFrame) status = '不在畫面內';
     else if (vis >= 98) status = '完整入鏡、無遮擋';
     else if (vis <= 2) status = '在畫面方向上，但被遮擋';
     else status = `可見約 ${vis}%（部分被遮擋）`;

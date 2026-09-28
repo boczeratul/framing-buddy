@@ -36,7 +36,7 @@ export function pickTarget(targets: Target[], id: string, eye: THREE.Vector3): T
 
 /** 取景器：以相機實際視角渲染場景，外加構圖輔助線與目標提示 */
 export class Viewfinder {
-  readonly camera = new THREE.PerspectiveCamera(40, 1.5, 0.3, 80000);
+  readonly camera = new THREE.PerspectiveCamera(40, 1.5, 0.3, 300000);
   readonly renderer: THREE.WebGLRenderer;
   private overlay: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;
@@ -45,7 +45,7 @@ export class Viewfinder {
   private dirty = true;
   private raycaster = new THREE.Raycaster();
   report: VisibilityReport = { target: null, visible: 1, frameFraction: null, inFrame: false };
-  private surf = { x: NaN, z: NaN, y: 0, version: -1, snap: false, solid: false };
+  private surf = { x: NaN, z: NaN, y: 0, version: -1, snap: false, solid: false, epoch: -1 };
   onReport?: (r: VisibilityReport) => void;
   private occlusionTimer = 0;
   private meter = new MultiMeter();
@@ -75,7 +75,10 @@ export class Viewfinder {
     const c = this.surf;
     if (c.x === s.x && c.z === s.z && c.version === this.world.version && c.snap) return c.y;
     const step = Math.hypot(s.x - c.x, s.z - c.z);
-    const walking = c.snap && c.solid && step < 12;
+    // 實景模型高度校正改變時，視同瞬間移動重新找站立面
+    const epoch = this.world.photoreal?.calibrationEpoch ?? 0;
+    const walking = c.snap && c.solid && step < 12 && epoch === c.epoch;
+    c.epoch = epoch;
     const eye = new THREE.Vector3(s.x, c.y, s.z);
     const r = this.world.surfaceAt(s.x, s.z, walking ? c.y + 2.5 : Infinity, eye);
     Object.assign(c, { x: s.x, z: s.z, y: r.y, solid: r.solid, version: this.world.version, snap: true });
@@ -296,19 +299,24 @@ export class Viewfinder {
     }
     const occluders = this.world.occluders().filter((o) => o !== target.self);
     const origin = cam.position.clone();
-    const samples = 24;
+    // 山峰只檢查山頂一帶的天際線（山體下半部、火山口邊緣本來就會擋住自己）
+    const peak = target.kind === 'peak';
+    const samples = peak ? 8 : 24;
+    const peakSpan = target.top.y - target.base.y;
+    const from = peak ? 1 - 100 / peakSpan : 0;
     let visible = 0;
     const p = new THREE.Vector3();
     const dir = new THREE.Vector3();
     this.raycaster.firstHitOnly = true;
     for (let i = 0; i < samples; i++) {
-      p.lerpVectors(target.base, target.top, (i + 0.5) / samples);
+      p.lerpVectors(target.base, target.top, from + ((1 - from) * (i + 0.5)) / samples);
+      if (peak) p.y += 30;
       dir.subVectors(p, origin);
       const dist = dir.length();
       this.raycaster.set(origin, dir.normalize());
       this.raycaster.near = 0.5;
       // 射線停在目標外緣，避免打到目標自己（OSM 建物、實景圖磚中的同一棟樓）
-      this.raycaster.far = Math.max(1, dist - (target.radius ?? 0) - 2);
+      this.raycaster.far = Math.max(1, dist - (peak ? Math.max(1500, dist * 0.08) : (target.radius ?? 0) + 2));
       const hit = this.raycaster.intersectObjects(occluders, true);
       if (!hit.length) visible++;
     }
@@ -316,8 +324,9 @@ export class Viewfinder {
     const base = target.base.clone().project(cam);
     const topLocal = target.top.clone().applyMatrix4(cam.matrixWorldInverse);
     const inFront = topLocal.z < 0;
-    const inFrame =
-      inFront && Math.abs(top.x) <= 1.05 && Math.min(top.y, base.y) <= 1 && Math.max(top.y, base.y) >= -1;
+    const inFrame = peak
+      ? inFront && Math.abs(top.x) <= 1 && Math.abs(top.y) <= 1
+      : inFront && Math.abs(top.x) <= 1.05 && Math.min(top.y, base.y) <= 1 && Math.max(top.y, base.y) >= -1;
     this.report = {
       target,
       visible: visible / samples,

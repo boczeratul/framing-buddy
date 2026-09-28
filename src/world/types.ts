@@ -23,6 +23,8 @@ export interface Target {
   self?: THREE.Object3D;
   /** 目標水平半徑：遮擋射線在此距離前停下，避免打到目標自己 */
   radius?: number;
+  /** 山峰：只判斷山頂是否被擋（山體下半部本來就會被自己的山坡擋住） */
+  kind?: 'peak';
 }
 
 export interface Preset {

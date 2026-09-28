@@ -19,7 +19,7 @@ type Mode = '2d' | '3d' | 'off';
 export class MapView {
   readonly renderer: THREE.WebGLRenderer;
   private ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 6000);
-  private persp = new THREE.PerspectiveCamera(50, 1, 1, 80000);
+  private persp = new THREE.PerspectiveCamera(50, 1, 1, 300000);
   private controls: OrbitControls;
   private overlay: HTMLCanvasElement;
   private ctx!: CanvasRenderingContext2D;

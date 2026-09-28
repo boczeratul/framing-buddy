@@ -73,7 +73,7 @@ export const DEFAULT_STATE: ShotState = {
   date: now.date,
   minutes: 17 * 60 + 30,
   clouds: 0.25,
-  visibility: 12,
+  visibility: 25,
   ev: 0,
   trees: true,
   grid: true,
@@ -96,7 +96,7 @@ function sanitize(s: ShotState): ShotState {
   s.focal = clamp(s.focal, FOCAL_MIN, FOCAL_MAX);
   s.height = clamp(s.height, 0, 2000);
   s.clouds = clamp(s.clouds, 0, 1);
-  s.visibility = clamp(s.visibility, 1, 80);
+  s.visibility = clamp(s.visibility, 1, 150);
   s.ev = clamp(s.ev, -5, 5);
   s.minutes = clamp(Math.round(s.minutes), 0, 1439);
   s.range = clamp(s.range, 1, 20);

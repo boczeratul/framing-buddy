@@ -4,7 +4,6 @@ import { buildCKS, CKS_ANCHOR, CKS_EXCLUSION, HALL, localToSite, type Floor } fr
 import { buildTaipei101, T101, TAIPEI101_FOOTPRINT } from '../scene/taipei101';
 import { buildHallgrimskirkja, HALLGRIMS_ANCHOR, HALLGRIMS_MASK, HALLGRIMS } from '../scene/hallgrimskirkja';
 import { LANDMARKS } from '../scene/landmarks';
-import { setMasks } from '../scene/regionmask';
 import { pointInRing } from './osm/parse';
 import type { MapLabel, Target } from './types';
 
@@ -141,6 +140,8 @@ export class LandmarkLayer {
   private placed = new Map<string, Placed>();
   private treesVisible = true;
   version = 0;
+  /** 目前需要挖空 Google 模型的範圍（場景座標） */
+  masks: { x: number; z: number }[][] = [];
 
   constructor() {
     this.group.name = 'landmarks';
@@ -204,7 +205,7 @@ export class LandmarkLayer {
       has.inst.group.updateMatrixWorld(true);
       if (p.google) masks.push(d.exclusion.map((q) => toLocal(q)));
     }
-    setMasks(masks);
+    this.masks = masks;
     if (changed) this.version++;
   }
 
