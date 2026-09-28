@@ -1,25 +1,28 @@
 import * as THREE from 'three';
 import { distanceLatLon, toLocal, offsetLatLon, type LatLon } from '../geo';
 import { buildCKS, CKS_ANCHOR, CKS_EXCLUSION, HALL, localToSite, type Floor } from '../scene/cks';
-import { buildTaipei101, T101 } from '../scene/taipei101';
+import { buildTaipei101, T101, TAIPEI101_FOOTPRINT } from '../scene/taipei101';
+import { buildHallgrimskirkja, HALLGRIMS_ANCHOR, HALLGRIMS_MASK, HALLGRIMS } from '../scene/hallgrimskirkja';
 import { LANDMARKS } from '../scene/landmarks';
-import { M } from '../scene/materials';
-import { applyRing, LANDMARK_RING } from '../scene/ringmask';
+import { setMasks } from '../scene/regionmask';
 import { pointInRing } from './osm/parse';
 import type { MapLabel, Target } from './types';
 
-// 地標：手工程序化模型（中正紀念堂園區、台北 101），在可視範圍內時放進場景。
-// 屬於「遠景」精細度；近景使用實景圖磚時，半徑內的部分會在 shader 中讓出。
+// 地標：自建的精細模型（中正紀念堂園區、台北 101、哈爾格林姆教堂）。
+// - 有 Google 圖磚時：地標進入近景範圍才換成自建模型，並把該區域的 Google 模型挖掉；
+//   遠離時隱藏，由 Google 模型呈現。
+// - 沒有 Google 時：可視範圍內一律顯示自建模型。
 
-for (const m of Object.values(M)) applyRing(m, 'far', LANDMARK_RING);
-
-interface LocalTarget {
+interface TargetSpec {
   id: string;
   label: string;
-  base: THREE.Vector3;
-  top: THREE.Vector3;
+  /** 相對錨點的頂部高度 */
+  top: number;
   aimAt: number;
   radius: number;
+  /** 相對錨點的水平位移（公尺，東、南） */
+  dx?: number;
+  dz?: number;
 }
 
 interface Instance {
@@ -27,9 +30,10 @@ interface Instance {
   solids: THREE.Object3D[];
   trees?: THREE.Object3D;
   labels: MapLabel[];
-  targets: LocalTarget[];
-  /** 區域座標（地標錨點為原點）的站立面高度 */
+  /** 區域座標（錨點為原點）的站立面高度（台基、台階等精確值） */
   surface?: (x: number, z: number) => number | null;
+  /** 只在沒有 Google 時顯示的附屬物（例如示意的周邊道路） */
+  fallbackOnly?: THREE.Object3D[];
 }
 
 interface LandmarkDef {
@@ -38,7 +42,9 @@ interface LandmarkDef {
   anchor: LatLon;
   /** 模型大致半徑（公尺） */
   radius: number;
+  /** 自建模型涵蓋的範圍：OSM 建物不重複生成、Google 模型在此挖空 */
   exclusion: LatLon[];
+  targets: TargetSpec[];
   create(): Instance;
 }
 
@@ -56,11 +62,7 @@ function floorHeight(f: Floor, x: number, z: number): number | null {
   return f.y0 + ((step + 1) / f.steps) * (f.y1 - f.y0);
 }
 
-const box101 = (() => {
-  const a = LANDMARKS.taipei101;
-  const c = (e: number, n: number) => offsetLatLon(a, e, n);
-  return [c(-60, 40), c(95, 40), c(95, -110), c(-60, -110)];
-})();
+const around = (a: LatLon, pts: [number, number][]) => pts.map(([e, n]) => offsetLatLon(a, e, n));
 
 export const LANDMARK_DEFS: LandmarkDef[] = [
   {
@@ -69,14 +71,15 @@ export const LANDMARK_DEFS: LandmarkDef[] = [
     anchor: CKS_ANCHOR,
     radius: 600,
     exclusion: CKS_EXCLUSION,
+    targets: [{ id: 'cks-hall', label: '中正紀念堂', top: HALL.top, aimAt: 0.55, radius: 90 }],
     create() {
       const cks = buildCKS();
       return {
         group: cks.group,
-        solids: [cks.buildings],
+        solids: [cks.buildings, cks.ground],
         trees: cks.trees,
         labels: cks.labels,
-        targets: [{ id: 'cks-hall', label: '中正紀念堂', base: new THREE.Vector3(0, 0, 0), top: new THREE.Vector3(0, HALL.top, 0), aimAt: 0.55, radius: 90 }],
+        fallbackOnly: [cks.roads],
         surface: (x, z) => {
           const { u, v } = localToSite(x, z);
           let y: number | null = null;
@@ -93,18 +96,24 @@ export const LANDMARK_DEFS: LandmarkDef[] = [
     id: 'taipei101',
     name: '台北 101',
     anchor: LANDMARKS.taipei101,
-    radius: 150,
-    exclusion: box101,
+    radius: 160,
+    exclusion: around(LANDMARKS.taipei101, TAIPEI101_FOOTPRINT),
+    targets: [{ id: 'taipei101', label: '台北 101', top: T101.spireTip, aimAt: 0.5, radius: 34 }],
     create() {
-      const g = buildTaipei101();
-      const group = new THREE.Group();
-      group.add(g);
-      return {
-        group,
-        solids: [g],
-        labels: [{ text: '台北 101', x: 0, z: 0 }],
-        targets: [{ id: 'taipei101', label: '台北 101', base: new THREE.Vector3(0, 0, 0), top: new THREE.Vector3(0, T101.spireTip, 0), aimAt: 0.5, radius: 34 }],
-      };
+      const m = buildTaipei101();
+      return { group: m.group, solids: [m.group], labels: [{ text: '台北 101', x: 0, z: 0 }] };
+    },
+  },
+  {
+    id: 'hallgrimskirkja',
+    name: '哈爾格林姆教堂',
+    anchor: HALLGRIMS_ANCHOR,
+    radius: 120,
+    exclusion: HALLGRIMS_MASK,
+    targets: [{ id: 'hallgrimskirkja', label: '哈爾格林姆教堂', top: HALLGRIMS.towerTop, aimAt: 0.55, radius: 30 }],
+    create() {
+      const m = buildHallgrimskirkja();
+      return { group: m.group, solids: [m.group], labels: m.labels };
     },
   },
 ];
@@ -113,19 +122,31 @@ interface Placed {
   def: LandmarkDef;
   inst: Instance;
   offset: THREE.Vector3;
+  probedAt: number;
+}
+
+export interface LandmarkPolicy {
+  range: number;
+  near: number;
+  /** Google 圖磚可用：自建模型只在近景接手 */
+  google: boolean;
+  /** 地面高度來源：地形（高程）與 Google 圖磚表面（取得不到時回傳 null） */
+  terrainAt: (x: number, z: number) => number;
+  googleAt?: (x: number, z: number) => number | null;
 }
 
 export class LandmarkLayer {
   readonly group = new THREE.Group();
   private cache = new Map<string, Instance>();
   private placed = new Map<string, Placed>();
+  private treesVisible = true;
   version = 0;
 
-  constructor(private heightAt: (x: number, z: number) => number) {
+  constructor() {
     this.group.name = 'landmarks';
   }
 
-  /** 是否落在任何地標範圍內（避免 OSM 建物與手工模型重疊） */
+  /** 是否落在任何地標範圍內（避免 OSM 建物與自建模型重疊） */
   excluded(p: LatLon): boolean {
     for (const d of LANDMARK_DEFS) {
       if (distanceLatLon(p, d.anchor) > d.radius * 1.6) continue;
@@ -134,77 +155,145 @@ export class LandmarkLayer {
     return false;
   }
 
-  /** 依相機位置決定要放進場景的地標 */
-  update(eye: LatLon, range: number, force = false) {
+  /** 依相機位置決定哪些地標以自建模型呈現 */
+  update(eye: LatLon, p: LandmarkPolicy, force = false) {
     let changed = false;
+    const now = performance.now();
+    const masks: { x: number; z: number }[][] = [];
     for (const d of LANDMARK_DEFS) {
-      const want = distanceLatLon(eye, d.anchor) < range + d.radius;
-      const has = this.placed.get(d.id);
+      const dist = distanceLatLon(eye, d.anchor);
+      const want = dist < (p.google ? p.near : p.range) + d.radius;
+      let has = this.placed.get(d.id);
       if (want && (!has || force)) {
         if (has) this.group.remove(has.inst.group);
         let inst = this.cache.get(d.id);
         if (!inst) {
           inst = d.create();
           this.cache.set(d.id, inst);
+          if (inst.trees) inst.trees.visible = this.treesVisible;
         }
         const l = toLocal(d.anchor);
-        const offset = new THREE.Vector3(l.x, this.heightAt(l.x, l.z), l.z);
-        inst.group.position.copy(offset);
-        inst.group.updateMatrixWorld(true);
+        has = { def: d, inst, offset: new THREE.Vector3(l.x, p.terrainAt(l.x, l.z), l.z), probedAt: -Infinity };
         this.group.add(inst.group);
-        this.placed.set(d.id, { def: d, inst, offset });
+        this.placed.set(d.id, has);
         changed = true;
       } else if (!want && has) {
         this.group.remove(has.inst.group);
         this.placed.delete(d.id);
+        has = undefined;
         changed = true;
       }
+      if (!has) continue;
+      for (const o of has.inst.fallbackOnly ?? []) o.visible = !p.google;
+      // Google 模式：底座高度對齊周圍 Google 地面，接縫才平整（圖磚持續載入，定期重算）
+      if (p.google && p.googleAt) {
+        if (now - has.probedAt > 2000) {
+          has.probedAt = now;
+          const y = this.probeGround(d, p.googleAt);
+          if (y !== null && Math.abs(y - has.offset.y) > 0.25) {
+            has.offset.y = y;
+            changed = true;
+          }
+        }
+      } else if (has.probedAt !== -Infinity) {
+        has.offset.y = p.terrainAt(has.offset.x, has.offset.z);
+        has.probedAt = -Infinity;
+        changed = true;
+      }
+      has.inst.group.position.copy(has.offset);
+      has.inst.group.updateMatrixWorld(true);
+      if (p.google) masks.push(d.exclusion.map((q) => toLocal(q)));
     }
+    setMasks(masks);
     if (changed) this.version++;
   }
 
+  /** 沿遮罩外圍一圈取樣 Google 地面，取低百分位數（樹、車、建物只會讓表面偏高） */
+  private probeGround(d: LandmarkDef, googleAt: (x: number, z: number) => number | null): number | null {
+    const ring = d.exclusion.map((q) => toLocal(q));
+    const cx = ring.reduce((s, q) => s + q.x, 0) / ring.length;
+    const cz = ring.reduce((s, q) => s + q.z, 0) / ring.length;
+    const ys: number[] = [];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      for (const t of [0, 0.5]) {
+        const x = a.x + (b.x - a.x) * t;
+        const z = a.z + (b.z - a.z) * t;
+        const len = Math.hypot(x - cx, z - cz) || 1;
+        const y = googleAt(x + ((x - cx) / len) * 14, z + ((z - cz) / len) * 14);
+        if (y !== null) ys.push(y);
+      }
+    }
+    if (ys.length < 3) return null;
+    ys.sort((a, b) => a - b);
+    return ys[Math.floor(ys.length * 0.3)];
+  }
+
   setTrees(v: boolean) {
+    this.treesVisible = v;
     for (const inst of this.cache.values()) if (inst.trees) inst.trees.visible = v;
   }
 
-  /**
-   * 近景使用實景圖磚時，陰影由圖磚負責；離相機近的地標不再投影，避免雙重陰影。
-   */
-  setShadowCasting(eye: THREE.Vector3, nearRadius: number, photoreal: boolean) {
+  /** (x, z) 是否在目前以自建模型呈現的地標範圍內 */
+  activeAt(x: number, z: number): boolean {
     for (const p of this.placed.values()) {
-      const d = Math.hypot(p.offset.x - eye.x, p.offset.z - eye.z);
-      const cast = !photoreal || d > nearRadius + p.def.radius;
-      p.inst.group.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = cast;
-      });
+      const ring = p.def.exclusion.map((q) => toLocal(q));
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const a = ring[i];
+        const b = ring[j];
+        if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+      }
+      if (inside) return true;
     }
+    return false;
   }
 
-  solids(treesVisible: boolean): THREE.Object3D[] {
+  solids(): THREE.Object3D[] {
     const out: THREE.Object3D[] = [];
     for (const p of this.placed.values()) {
       out.push(...p.inst.solids);
-      if (p.inst.trees && treesVisible) out.push(p.inst.trees);
+      if (p.inst.trees && this.treesVisible) out.push(p.inst.trees);
     }
     return out;
   }
 
-  labels(): MapLabel[] {
+  labels(eye: LatLon, range: number): MapLabel[] {
     const out: MapLabel[] = [];
-    for (const p of this.placed.values())
-      for (const l of p.inst.labels) out.push({ ...l, x: l.x + p.offset.x, z: l.z + p.offset.z });
+    for (const d of LANDMARK_DEFS) {
+      const p = this.placed.get(d.id);
+      if (p) for (const l of p.inst.labels) out.push({ ...l, x: l.x + p.offset.x, z: l.z + p.offset.z });
+      else if (distanceLatLon(eye, d.anchor) < range + d.radius) out.push({ text: d.name, ...toLocal(d.anchor) });
+    }
     return out;
   }
 
-  targets(): Target[] {
+  /** 可視範圍內所有地標的目標（不論是否以自建模型呈現） */
+  targets(eye: LatLon, range: number, groundAt: (x: number, z: number) => number): Target[] {
     const out: Target[] = [];
-    for (const p of this.placed.values())
-      for (const t of p.inst.targets)
-        out.push({ id: t.id, label: t.label, base: t.base.clone().add(p.offset), top: t.top.clone().add(p.offset), aimAt: t.aimAt, radius: t.radius, self: p.def.id === 'taipei101' ? p.inst.group : undefined });
+    for (const d of LANDMARK_DEFS) {
+      if (distanceLatLon(eye, d.anchor) > range + d.radius) continue;
+      const p = this.placed.get(d.id);
+      const l = toLocal(d.anchor);
+      const y = p ? p.offset.y : groundAt(l.x, l.z);
+      for (const t of d.targets) {
+        const base = new THREE.Vector3(l.x + (t.dx ?? 0), y, l.z + (t.dz ?? 0));
+        out.push({
+          id: t.id,
+          label: t.label,
+          base,
+          top: base.clone().setY(y + t.top),
+          aimAt: t.aimAt,
+          radius: t.radius,
+          self: p && d.id !== 'cks' ? p.inst.group : undefined,
+        });
+      }
+    }
     return out;
   }
 
-  /** 手工模型的站立面（台基、台階、平台）；不在任何地標範圍時回傳 null */
+  /** 自建模型的精確站立面（台基、台階、平台）；不在任何地標範圍時回傳 null */
   surfaceAt(x: number, z: number): number | null {
     let y: number | null = null;
     for (const p of this.placed.values()) {

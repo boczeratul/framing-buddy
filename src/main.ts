@@ -359,3 +359,16 @@ requestAnimationFrame(frame);
 // 開發模式：方便在主控台檢查狀態
 if (import.meta.env.DEV) Object.assign(window, { __fb: { world, store, gmap, viewfinder, map } });
 if (import.meta.env.DEV) Object.assign(window, { THREE });
+if (import.meta.env.DEV)
+  Object.assign(window, {
+    __tris: (o: THREE.Object3D) => {
+      let n = 0;
+      o.traverse((m) => {
+        const g = (m as THREE.Mesh).geometry;
+        if (!g) return;
+        const c = g.index ? g.index.count / 3 : g.getAttribute('position').count / 3;
+        n += (m as THREE.InstancedMesh).isInstancedMesh ? c * (m as THREE.InstancedMesh).count : c;
+      });
+      return n;
+    },
+  });

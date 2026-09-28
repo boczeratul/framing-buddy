@@ -286,3 +286,313 @@ export class Batch {
     return group;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 精細建模工具：屋瓦瓦壟、瓦當、斗拱、細緻欄杆、車削柱
+
+/** 環上第 face 個面、橫向比例 s（0–1）處的點；面由角點索引 face*perSide 起算 */
+function pointOnFace(ring: Ring, face: number, perSide: number, s: number): THREE.Vector3 {
+  const n = ring.length;
+  const f = s * perSide;
+  const i = Math.min(perSide - 1, Math.floor(f));
+  const a = ring[(face * perSide + i) % n];
+  const b = ring[(face * perSide + i + 1) % n];
+  return a.clone().lerp(b, f - i);
+}
+
+/**
+ * 在放樣屋頂上鋪瓦壟：每個屋面沿坡度方向排列半圓形瓦壟，屋簷處加瓦當。
+ * rings 由簷口到屋脊；faces 為屋面數、perSide 為每面細分數；maxRing 可限制只鋪到某一環（歇山的山花以上不鋪）。
+ */
+export function tileRidges(
+  rings: Ring[],
+  faces: number,
+  perSide: number,
+  spacing = 0.9,
+  opts: { radius?: number; lift?: number; maxRing?: number; skipFaces?: number[] } = {},
+): { ridges: THREE.BufferGeometry; caps: THREE.BufferGeometry } {
+  const { radius = 0.13, lift = 0.02, maxRing = rings.length - 1, skipFaces = [] } = opts;
+  const ridgeParts: THREE.BufferGeometry[] = [];
+  const capParts: THREE.BufferGeometry[] = [];
+  const bottom = rings[0];
+  for (let f = 0; f < faces; f++) {
+    if (skipFaces.includes(f)) continue;
+    const a = bottom[(f * perSide) % bottom.length];
+    const b = bottom[((f + 1) * perSide) % bottom.length];
+    const width = a.distanceTo(b);
+    const count = Math.max(2, Math.floor(width / spacing));
+    for (let k = 1; k < count; k++) {
+      const s = k / count;
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= maxRing; i++) pts.push(pointOnFace(rings[i], f, perSide, s));
+      // 往上抬一點，避免與屋面 z-fighting
+      const up = new THREE.Vector3(0, lift + radius * 0.5, 0);
+      const curve = new THREE.CatmullRomCurve3(pts.map((p) => p.clone().add(up)));
+      ridgeParts.push(new THREE.TubeGeometry(curve, Math.max(4, maxRing), radius, 5, false));
+      // 瓦當：屋簷端的圓片，朝外
+      const p0 = pts[0];
+      const dir = pts[0].clone().sub(pts[1]).normalize();
+      const disc = new THREE.CylinderGeometry(radius * 1.6, radius * 1.6, 0.06, 10);
+      disc.rotateX(Math.PI / 2);
+      disc.lookAt(dir);
+      disc.translate(p0.x, p0.y + radius * 0.5, p0.z);
+      capParts.push(disc);
+    }
+  }
+  return { ridges: merge(ridgeParts), caps: merge(capParts) };
+}
+
+/**
+ * 斗拱帶：沿多邊形路徑（從上方看逆時針）重複排列斗拱。
+ * 每朵斗拱＝坐斗＋十字交錯的拱臂＋上方散斗與挑出的昂，朝外挑出 reach。
+ */
+export function dougongBand(path: THREE.Vector2[], y: number, spacing: number, scale = 1, reach = 1.2): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const n = path.length;
+  for (let i = 0; i < n; i++) {
+    const a = path[i];
+    const b = path[(i + 1) % n];
+    const len = a.distanceTo(b);
+    const count = Math.max(1, Math.round(len / spacing));
+    const ang = Math.atan2(-(b.y - a.y), b.x - a.x);
+    // 向外法線（逆時針路徑的右手側）
+    const ox = (b.y - a.y) / len;
+    const oz = -(b.x - a.x) / len;
+    for (let k = 0; k < count; k++) {
+      const t = (k + 0.5) / count;
+      const px = a.x + (b.x - a.x) * t;
+      const pz = a.y + (b.y - a.y) * t;
+      const s = scale;
+      const pieces: [number, number, number, number, number, number][] = [
+        // w(沿牆), h, d(向外), 向外位移, 高度位移, 沿牆位移
+        [0.7 * s, 0.35 * s, 0.7 * s, 0, 0, 0],
+        [1.9 * s, 0.28 * s, 0.34 * s, 0.1 * s, 0.35 * s, 0],
+        [0.34 * s, 0.28 * s, reach * s, reach * 0.45 * s, 0.35 * s, 0],
+        [0.45 * s, 0.25 * s, 0.45 * s, 0, 0.63 * s, -0.75 * s],
+        [0.45 * s, 0.25 * s, 0.45 * s, 0, 0.63 * s, 0.75 * s],
+        [2.5 * s, 0.26 * s, 0.34 * s, 0.35 * s, 0.88 * s, 0],
+        [0.34 * s, 0.26 * s, reach * 1.4 * s, reach * 0.7 * s, 0.88 * s, 0],
+        [0.5 * s, 0.25 * s, 0.5 * s, reach * 1.3 * s, 1.14 * s, 0],
+      ];
+      for (const [w, h, d, out, dy, along] of pieces) {
+        const g = new THREE.BoxGeometry(w, h, d);
+        g.translate(along, dy + h / 2, 0);
+        g.rotateY(ang);
+        g.translate(px + ox * out, y, pz + oz * out);
+        parts.push(g);
+      }
+    }
+  }
+  return merge(parts);
+}
+
+/** 細緻欄杆：望柱（柱身＋蓮頭）＋欄板（外框＋內凹花板）＋地栿 */
+export function balustradeFine(path: THREE.Vector2[], y: number, height = 1.1, spacing = 2.2): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const place = (g: THREE.BufferGeometry, ang: number, x: number, yy: number, z: number) => {
+    g.rotateY(ang);
+    g.translate(x, yy, z);
+    parts.push(g);
+  };
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const len = a.distanceTo(b);
+    const ang = Math.atan2(-(b.y - a.y), b.x - a.x);
+    const n = Math.max(1, Math.round(len / spacing));
+    // 地栿
+    place(new THREE.BoxGeometry(len, 0.18, 0.4), ang, (a.x + b.x) / 2, y + 0.09, (a.y + b.y) / 2);
+    for (let k = 0; k <= n; k++) {
+      const t = k / n;
+      const x = a.x + (b.x - a.x) * t;
+      const z = a.y + (b.y - a.y) * t;
+      place(new THREE.BoxGeometry(0.3, height, 0.3), ang, x, y + height / 2, z);
+      const head = new THREE.CylinderGeometry(0.12, 0.2, 0.32, 8);
+      place(head, ang, x, y + height + 0.16, z);
+      const knob = new THREE.SphereGeometry(0.12, 8, 6);
+      place(knob, ang, x, y + height + 0.38, z);
+      if (k < n) {
+        const mx = a.x + (b.x - a.x) * (t + 0.5 / n);
+        const mz = a.y + (b.y - a.y) * (t + 0.5 / n);
+        const w = len / n - 0.34;
+        place(new THREE.BoxGeometry(w, 0.14, 0.26), ang, mx, y + height - 0.12, mz); // 扶手
+        place(new THREE.BoxGeometry(w, height * 0.62, 0.12), ang, mx, y + 0.2 + height * 0.31, mz); // 欄板
+        place(new THREE.BoxGeometry(w * 0.7, height * 0.36, 0.2), ang, mx, y + 0.2 + height * 0.31, mz); // 花板
+      }
+    }
+  }
+  return merge(parts);
+}
+
+/** 車削柱：柱礎＋柱身（微收分）＋柱頭 */
+export function column(r: number, h: number, x: number, y: number, z: number, seg = 16): THREE.BufferGeometry {
+  const prof = [
+    [r * 1.45, 0], [r * 1.45, 0.25], [r * 1.25, 0.4], [r * 1.05, 0.55], [r, 0.7],
+    [r * 0.92, h - 0.8], [r * 1.02, h - 0.6], [r * 1.12, h - 0.45], [r * 1.12, h - 0.2], [r * 1.3, h - 0.2], [r * 1.3, h], [0, h],
+  ].map(([a, b]) => new THREE.Vector2(a, b));
+  const g = new THREE.LatheGeometry([new THREE.Vector2(0, 0), ...prof], seg);
+  g.translate(x, y, z);
+  return g;
+}
+
+/** 以 canvas 繪製的匾額貼圖（直式或橫式文字） */
+export function plaqueTexture(text: string, opts: { vertical?: boolean; bg?: string; fg?: string; border?: string } = {}): THREE.CanvasTexture {
+  const { vertical = false, bg = '#1c3f8f', fg = '#f1d27a', border = '#d4b35a' } = opts;
+  const c = document.createElement('canvas');
+  const n = text.length;
+  c.width = vertical ? 256 : 256 * n;
+  c.height = vertical ? 256 * n : 256;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 18;
+  ctx.strokeRect(12, 12, c.width - 24, c.height - 24);
+  ctx.fillStyle = fg;
+  ctx.font = `bold 190px "Noto Serif TC","PingFang TC","Microsoft JhengHei",serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < n; i++) {
+    const x = vertical ? c.width / 2 : 128 + i * 256;
+    const y = vertical ? 128 + i * 256 : c.height / 2;
+    ctx.fillText(text[i], x, y + 8);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+/** 回傳放樣屋頂的環（供鋪瓦壟等細部使用） */
+export function roofRingsRect(o: { hw: number; hd: number; height: number; ridge?: number; curve?: number; cornerLift?: number; gableAt?: number; top?: number; steps?: number; perSide?: number }): Ring[] {
+  const { hw, hd, height, ridge = 0, curve = 1.7, cornerLift = 0, gableAt = 1, top = 1, steps = 10, perSide = 8 } = o;
+  const rings: Ring[] = [];
+  const ridgeHw = Math.max(ridge, 0.01);
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * top;
+    const tx = Math.min(t, gableAt);
+    const w = hw + (ridgeHw - hw) * tx;
+    const d = Math.max(hd + (0.01 - hd) * t, 0.01);
+    const y = height * Math.pow(t, curve);
+    const liftAmt = cornerLift * Math.pow(1 - t, 3);
+    rings.push(rectRing(w, d, y, perSide, (wc) => wc * liftAmt));
+  }
+  return rings;
+}
+
+export function roofRingsOct(o: { radius: number; height: number; curve?: number; cornerLift?: number; top?: number; apex?: number; steps?: number; perSide?: number }): Ring[] {
+  const { radius, height, curve = 1.6, cornerLift = 0, top = 1, apex = 0.3, steps = 12, perSide = 6 } = o;
+  const rings: Ring[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * top;
+    const r = radius + (apex - radius) * t;
+    const y = height * Math.pow(t, curve);
+    const liftAmt = cornerLift * Math.pow(1 - t, 3);
+    rings.push(polygonRing(8, r, y, perSide, Math.PI / 8, (w) => w * liftAmt));
+  }
+  return rings;
+}
+
+/** 平移一組環 */
+export function offsetRings(rings: Ring[], x: number, y: number, z: number): Ring[] {
+  return rings.map((r) => r.map((p) => p.clone().add(new THREE.Vector3(x, y, z))));
+}
+
+/**
+ * 以世界座標重建 UV（依三角形法線選投影面），1 UV 單位 = scale 公尺。
+ * 用於需要真實尺度貼圖（石材分縫、混凝土模板紋）的幾何；請在幾何已放到最終位置後呼叫。
+ */
+export function planarUV(geometry: THREE.BufferGeometry, scale = 1): THREE.BufferGeometry {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const uv = new Float32Array(pos.count * 2);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    n.subVectors(b, a).cross(c.clone().sub(a));
+    const ax = Math.abs(n.x);
+    const ay = Math.abs(n.y);
+    const az = Math.abs(n.z);
+    for (let k = 0; k < 3; k++) {
+      const p = k === 0 ? a : k === 1 ? b : c;
+      let u: number, v: number;
+      if (ay >= ax && ay >= az) [u, v] = [p.x, p.z];
+      else if (ax >= az) [u, v] = [p.z, p.y];
+      else [u, v] = [p.x, p.y];
+      uv[(i + k) * 2] = u / scale;
+      uv[(i + k) * 2 + 1] = v / scale;
+    }
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * 把在 XY 平面建好的幾何（+Z 朝外）貼到牆面：pos 為牆面上的位置，normal 為水平朝外方向。
+ */
+export function placeOnWall(g: THREE.BufferGeometry, pos: THREE.Vector3, normal: THREE.Vector3): THREE.BufferGeometry {
+  const n = normal.clone().setY(0).normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3().crossVectors(up, n);
+  const m = new THREE.Matrix4().makeBasis(right, up, n).setPosition(pos);
+  g.applyMatrix4(m);
+  return g;
+}
+
+/** 尖拱（等邊尖拱）輪廓點：寬 w、總高 h（底在 y=0），順時針或逆時針由 ccw 決定 */
+export function pointedArchPoints(w: number, h: number, ccw = true, seg = 10): THREE.Vector2[] {
+  const r = w; // 等邊尖拱：半徑＝寬度
+  const rise = Math.sqrt(r * r - (w / 2) * (w / 2));
+  const spring = Math.max(0, h - rise);
+  const pts: THREE.Vector2[] = [new THREE.Vector2(-w / 2, 0), new THREE.Vector2(w / 2, 0), new THREE.Vector2(w / 2, spring)];
+  // 右半弧：圓心在左拱腳 (-w/2, spring)
+  const a0 = 0;
+  const a1 = Math.atan2(rise, w / 2);
+  for (let i = 1; i <= seg; i++) {
+    const t = a0 + ((a1 - a0) * i) / seg;
+    pts.push(new THREE.Vector2(-w / 2 + r * Math.cos(t), spring + r * Math.sin(t)));
+  }
+  // 左半弧：圓心在右拱腳 (w/2, spring)
+  const b1 = Math.PI - a1;
+  for (let i = 1; i <= seg; i++) {
+    const t = b1 + ((Math.PI - b1) * i) / seg;
+    pts.push(new THREE.Vector2(w / 2 + r * Math.cos(t), spring + r * Math.sin(t)));
+  }
+  pts.push(new THREE.Vector2(-w / 2, spring));
+  return ccw ? pts : pts.reverse();
+}
+
+/** 半圓拱輪廓點 */
+export function roundArchPoints(w: number, h: number, ccw = true, seg = 16): THREE.Vector2[] {
+  const r = w / 2;
+  const spring = Math.max(0, h - r);
+  const pts: THREE.Vector2[] = [new THREE.Vector2(-r, 0), new THREE.Vector2(r, 0)];
+  for (let i = 0; i <= seg; i++) {
+    const t = (i / seg) * Math.PI;
+    pts.push(new THREE.Vector2(r * Math.cos(t), spring + r * Math.sin(t)));
+  }
+  return ccw ? pts : pts.reverse();
+}
+
+/** 以外輪廓與內輪廓（皆為封閉點列）擠出「框」 */
+export function frameFromOutlines(outer: THREE.Vector2[], inner: THREE.Vector2[], depth: number): THREE.BufferGeometry {
+  const s = new THREE.Shape(outer);
+  s.holes.push(new THREE.Path(inner.slice().reverse()));
+  return new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, curveSegments: 1 });
+}
+
+/** 將點列等比縮放（以底邊中心為基準）：寬度 dw、高度 dh 的內縮 */
+export function insetOutline(pts: THREE.Vector2[], dw: number, dh: number): THREE.Vector2[] {
+  const xs = pts.map((p) => Math.abs(p.x));
+  const w = Math.max(...xs) * 2;
+  const h = Math.max(...pts.map((p) => p.y));
+  const sx = (w - 2 * dw) / w;
+  const sy = (h - dh) / h;
+  return pts.map((p) => new THREE.Vector2(p.x * sx, p.y * sy + 0.001));
+}

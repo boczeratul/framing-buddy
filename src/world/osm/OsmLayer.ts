@@ -93,11 +93,13 @@ export class OsmLayer {
   /** 內容改變時遞增（供重新渲染、重新計算站立面） */
   version = 0;
   nearEnabled = false;
+  /** 遠景：'mesh' 建模（沒有 Google 時）／'names' 只取有名稱的高樓當目標 */
+  farMode: 'mesh' | 'names' = 'mesh';
   errors = 0;
   private tiles = new Map<string, TileState>();
   /** 目前選取（需要）的圖磚 */
   private selection = new Set<string>();
-  private lastSel = { lat: NaN, lon: NaN, az: NaN, fov: NaN, range: NaN, near: NaN, nearOn: false };
+  private lastSel = { lat: NaN, lon: NaN, az: NaN, fov: NaN, range: NaN, near: NaN, nearOn: false, farMode: '' };
 
   constructor(private ctx: OsmContext) {
     this.group.name = 'osm';
@@ -134,10 +136,11 @@ export class OsmLayer {
     const moved = Math.hypot((eye.lat - L.lat) * 110574, (eye.lon - L.lon) * 111320 * Math.cos(eye.lat * DEG));
     const changed =
       !(moved < 60) || angleDiff(azimuth, L.az) > 8 || Math.abs(hfov - L.fov) > 4 ||
-      range !== L.range || near !== L.near || this.nearEnabled !== L.nearOn;
+      range !== L.range || near !== L.near || this.nearEnabled !== L.nearOn || this.farMode !== L.farMode;
     const now = performance.now();
     if (changed) {
-      Object.assign(L, { lat: eye.lat, lon: eye.lon, az: azimuth, fov: hfov, range, near, nearOn: this.nearEnabled });
+      if (this.farMode !== L.farMode) for (const t of this.tiles.values()) if (t.kind === 'far' && t.status === 'built') this.unbuild(t);
+      Object.assign(L, { lat: eye.lat, lon: eye.lon, az: azimuth, fov: hfov, range, near, nearOn: this.nearEnabled, farMode: this.farMode });
       this.selection.clear();
       const half = Math.min(90, hfov / 2 + 25);
       const context = Math.max(near * 1.8, 2000);
@@ -238,7 +241,12 @@ export class OsmLayer {
       if (!best || t.priority < best.priority) best = t;
     }
     if (!best?.data) return;
-    best.content = buildTile(best.data, { detail: best.kind, heightAt: this.ctx.heightAt, excluded: this.ctx.excluded });
+    best.content = buildTile(best.data, {
+      detail: best.kind,
+      namesOnly: best.kind === 'far' && this.farMode === 'names',
+      heightAt: this.ctx.heightAt,
+      excluded: this.ctx.excluded,
+    });
     best.status = 'built';
     this.group.add(best.content.group);
     this.refresh();

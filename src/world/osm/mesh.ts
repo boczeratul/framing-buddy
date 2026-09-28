@@ -186,6 +186,8 @@ function hash(s: string): number {
 
 export interface TileBuildContext {
   detail: 'far' | 'near';
+  /** 只計算目標（名稱），不建幾何（Google 模式下遠景由 Google 呈現） */
+  namesOnly?: boolean;
   heightAt: (x: number, z: number) => number;
   excluded: (p: LatLon) => boolean;
 }
@@ -228,6 +230,21 @@ export function buildTile(features: Feature[], ctx: TileBuildContext): TileConte
     const outer = rings[0];
     if (outer.length < 3 || Math.abs(signedArea(outer)) < 4) continue;
 
+    const name = f.tags['name:zh-Hant'] ?? f.tags['name:zh'] ?? f.tags.name;
+    const cxAll = outer.reduce((s, p) => s + p[0], 0) / outer.length;
+    const czAll = outer.reduce((s, p) => s + p[1], 0) / outer.length;
+    if (name && (shape.top >= 120 || (f.kind === 'tower' && shape.top >= 100))) {
+      targets.push({
+        id: `osm-${f.id}`,
+        label: name,
+        base: v3(cxAll, ground, czAll),
+        top: v3(cxAll, ground + shape.top, czAll),
+        aimAt: 0.5,
+        radius: Math.max(...outer.map((p) => Math.hypot(p[0] - cxAll, p[1] - czAll))),
+      });
+    }
+    if (ctx.namesOnly) continue;
+
     const h = hash(f.id);
     const tall = shape.top > 80;
     const facade = new THREE.Color(osmColour(f.tags['building:colour']) ?? (tall ? GLASS[h % GLASS.length] : PALETTE[h % PALETTE.length]));
@@ -269,18 +286,6 @@ export function buildTile(features: Feature[], ctx: TileBuildContext): TileConte
     const roofDone = near && shape.eave < shape.top - 0.3 ? shapedRoof(outer, shape.roofShape, yE, yT, roofCol, facade, roofs, tiles, walls) : false;
     if (!roofDone) flatCap(rings.map((r) => r.map(top)), yE, roofCol, roofs);
 
-    // 有名字的高樓與高塔 → 可對準的目標
-    const name = f.tags['name:zh-Hant'] ?? f.tags['name:zh'] ?? f.tags.name;
-    if (name && (shape.top >= 120 || (f.kind === 'tower' && shape.top >= 100))) {
-      targets.push({
-        id: `osm-${f.id}`,
-        label: name,
-        base: v3(cx, ground, cz),
-        top: v3(cx, yT, cz),
-        aimAt: 0.5,
-        radius: Math.max(...outer.map((p) => Math.hypot(p[0] - cx, p[1] - cz))),
-      });
-    }
   }
 
   const solids: THREE.Object3D[] = [];

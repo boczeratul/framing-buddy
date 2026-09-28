@@ -483,9 +483,11 @@ export function buildCKS() {
   const floors: Floor[] = [];
   const P = L.park;
 
-  // 地面
+  // 地面（周邊道路另外分組：有 Google 圖磚時用真實道路，不顯示示意道路）
   const ground = new THREE.Group();
-  for (const r of roads()) ground.add(groundMesh(r, M.road, 0.01));
+  const roadGroup = new THREE.Group();
+  for (const r of roads()) roadGroup.add(groundMesh(r, M.road, 0.01));
+  group.add(roadGroup);
   ground.add(groundMesh(P, M.grass, 0.02, 40));
   const sq = L.square;
   ground.add(groundMesh(rect(sq.u0, -sq.half, sq.u1, sq.half), M.paving, 0.05, 16));
@@ -558,7 +560,7 @@ export function buildCKS() {
     ...L.gates.map((g) => lab(g.name, g.u, g.v - Math.sign(g.v) * 18, 2.5)),
   ];
 
-  return { group, buildings, trees, floors, labels, hallTop: new THREE.Vector3(0, HALL.top, 0) };
+  return { group, buildings, ground, roads: roadGroup, trees, floors, labels, hallTop: new THREE.Vector3(0, HALL.top, 0) };
 }
 
 /** 園區邊界（經緯度），用來避免 OSM 建物與手工模型重疊 */

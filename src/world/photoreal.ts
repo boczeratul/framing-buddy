@@ -3,19 +3,20 @@ import { TilesRenderer } from '3d-tiles-renderer';
 import { GLTFExtensionsPlugin, GoogleCloudAuthPlugin, ReorientationPlugin, TileCompressionPlugin, UnloadTilesPlugin } from '3d-tiles-renderer/plugins';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import type { LatLon } from '../geo';
-import { applyRing, NEAR_RING } from '../scene/ringmask';
+import { applyMask, inMask, maskedDepthMaterial } from '../scene/regionmask';
 
-// 近景精細模型：Google Photorealistic 3D Tiles。
+// Google Photorealistic 3D Tiles：遠景全部使用，近景在沒有自建模型的地方使用。
 // - ReorientationPlugin 把地球座標轉成以原點為中心、Y 朝上的局部座標（X 西、Z 北），
 //   外層再轉 180° 對齊本專案的 X 東、Z 南。
-// - 自訂遮罩外掛只載入相機近景半徑內的圖磚；片段著色再依半徑精準裁切。
+// - 範圍外掛只載入可視範圍內的圖磚（距離越遠 LOD 越粗，由圖磚本身的幾何誤差決定）。
+// - 自建模型接手的區域以多邊形遮罩挖掉（畫面、陰影、射線偵測都排除）。
 // - 圖磚原本是不受光的照片貼圖，改成受光材質才能模擬不同時間的日照與陰影（可切回原始光影）。
 
 const DEG = Math.PI / 180;
 
-/** 只保留與相機近景球體相交的圖磚 */
-class NearMaskPlugin {
-  name = 'FB_NEAR_MASK';
+/** 只保留與相機可視範圍球體相交的圖磚 */
+class RangeMaskPlugin {
+  name = 'FB_RANGE_MASK';
   sphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
 
   calculateTileViewError(tile: { engineData: { boundingVolume: { intersectsSphere(s: THREE.Sphere): boolean } } }, target: { inView: boolean; error: number; distance: number }) {
@@ -42,7 +43,7 @@ export class PhotorealLayer {
   version = 0;
   onChange?: () => void;
   private reorient: ReorientationPlugin;
-  private mask = new NearMaskPlugin();
+  private mask = new RangeMaskPlugin();
   private materials = new Set<TileMaterials>();
   private relight = true;
   private daylight = 1;
@@ -112,13 +113,13 @@ export class PhotorealLayer {
     this.cameras = want;
   }
 
-  /** 每幀呼叫：更新近景遮罩並讓圖磚依相機載入／卸載 */
-  update(eye: THREE.Vector3, nearRadius: number) {
+  /** 每幀呼叫：更新可視範圍並讓圖磚依相機載入／卸載 */
+  update(eye: THREE.Vector3, range: number) {
     if (this.failed) return;
     this.root.updateMatrixWorld(true);
     const local = this.tiles.group.worldToLocal(eye.clone());
     this.mask.sphere.center.copy(local);
-    this.mask.sphere.radius = nearRadius * 1.15;
+    this.mask.sphere.radius = range * 1.1;
     this.tiles.update();
     if (!this.calibrated) this.calibrate();
   }
@@ -169,7 +170,8 @@ export class PhotorealLayer {
       for (; n && n !== group; n = n.parent) if (!n.visible) return false;
       return n === group;
     };
-    const out = hits.filter((h) => shown(h.object)).sort((a, b) => a.distance - b.distance);
+    // 被自建模型取代的區域不算
+    const out = hits.filter((h) => shown(h.object) && !inMask(h.point.x, h.point.z)).sort((a, b) => a.distance - b.distance);
     return firstOnly ? out.slice(0, 1) : out;
   }
 
@@ -198,15 +200,15 @@ export class PhotorealLayer {
       const map = old.map ?? null;
       const lit = new THREE.MeshStandardMaterial({ map, roughness: 1, metalness: 0, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 0.45 * this.daylight });
       const unlit = new THREE.MeshBasicMaterial({ map });
-      applyRing(lit, 'near', NEAR_RING);
-      applyRing(unlit, 'near', NEAR_RING);
+      applyMask(lit);
+      applyMask(unlit);
+      mesh.customDepthMaterial = maskedDepthMaterial;
       old.dispose();
       lit.userData.mesh = mesh;
       const entry = { lit, unlit };
       this.materials.add(entry);
       mesh.userData.fbMaterials = entry;
       if (!mesh.geometry.getAttribute('normal')) mesh.geometry.computeVertexNormals();
-      mesh.geometry.computeBoundsTree?.();
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.swap(entry);
