@@ -38,6 +38,8 @@ export class PhotorealLayer {
   readonly root = new THREE.Group();
   readonly tiles: TilesRenderer;
   failed: string | null = null;
+  /** 給遮擋判定用的代理物件：射線只打到畫面上顯示、且未被自建模型取代的圖磚 */
+  readonly occluder: THREE.Object3D;
   /** 原點地面已校正 */
   calibrated = false;
   version = 0;
@@ -54,9 +56,15 @@ export class PhotorealLayer {
 
   constructor(apiKey: string, origin: LatLon) {
     this.root.name = 'photoreal';
+    this.occluder = new THREE.Object3D();
+    this.occluder.raycast = (rc: THREE.Raycaster, hits: THREE.Intersection[]) => {
+      hits.push(...this.raycast(rc));
+    };
     this.root.rotation.y = Math.PI;
     const tiles = new TilesRenderer();
     tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
+    // 遠景全靠 Google 模型：比建議值（20 px）更精細一些
+    tiles.errorTarget = 12;
     const draco = new DRACOLoader().setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
     tiles.registerPlugin(new TileCompressionPlugin());

@@ -197,7 +197,7 @@ export class World {
   /** 會遮擋視線的物件 */
   occluders(): THREE.Object3D[] {
     const list = [...this.landmarks.solids(), ...this.osm.solids];
-    if (this.photorealOn && this.photoreal) list.push(this.photoreal.tiles.group);
+    if (this.photorealOn && this.photoreal) list.push(this.photoreal.occluder);
     return list;
   }
 

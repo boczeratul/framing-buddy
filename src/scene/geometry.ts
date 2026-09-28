@@ -188,32 +188,6 @@ export function stairs(width: number, steps: number, rise: number, tread: number
   return merge(parts);
 }
 
-/** 欄杆：沿路徑放置立柱與扶手 */
-export function balustrade(path: THREE.Vector2[], y: number, height = 1.1, spacing = 2.4): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i], b = path[i + 1];
-    const len = a.distanceTo(b);
-    const ang = Math.atan2(-(b.y - a.y), b.x - a.x);
-    const rail = new THREE.BoxGeometry(len, 0.18, 0.3);
-    rail.rotateY(ang);
-    rail.translate((a.x + b.x) / 2, y + height, (a.y + b.y) / 2);
-    parts.push(rail);
-    const base = new THREE.BoxGeometry(len, 0.2, 0.34);
-    base.rotateY(ang);
-    base.translate((a.x + b.x) / 2, y + 0.1, (a.y + b.y) / 2);
-    parts.push(base);
-    const n = Math.max(1, Math.round(len / spacing));
-    for (let k = 0; k <= n; k++) {
-      const t = k / n;
-      const post = new THREE.BoxGeometry(0.32, height, 0.32);
-      post.translate(a.x + (b.x - a.x) * t, y + height / 2, a.y + (b.y - a.y) * t);
-      parts.push(post);
-    }
-  }
-  return merge(parts);
-}
-
 /** 平面多邊形（x, z）擠出成柱體：y0 → y1 */
 export function extrude(points: [number, number][], y0: number, y1: number): THREE.BufferGeometry {
   const shape = new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));

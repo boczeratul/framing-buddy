@@ -66,10 +66,13 @@ export function buildTrees(
     }
   }
 
-  const trunkGeo = new THREE.CylinderGeometry(0.14, 0.24, 1, 6).translate(0, 0.5, 0);
+  const trunkGeo = new THREE.CylinderGeometry(0.14, 0.24, 1, 8).translate(0, 0.5, 0);
   const crownGeo = new THREE.IcosahedronGeometry(1, 1);
   const trunks = new THREE.InstancedMesh(trunkGeo, M.trunk, spots.length);
   const crowns = new THREE.InstancedMesh(crownGeo, M.foliage, spots.length);
+  // 樹冠由一個主球與兩個側球組成，輪廓較自然
+  const sideA = new THREE.InstancedMesh(crownGeo, M.foliage, spots.length);
+  const sideB = new THREE.InstancedMesh(crownGeo, M.foliage, spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const color = new THREE.Color();
@@ -81,17 +84,25 @@ export function buildTrees(
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI);
     m.compose(new THREE.Vector3(s.x, trunkH + r * 0.75, s.z), q, new THREE.Vector3(r * (0.9 + rnd() * 0.25), r * (0.7 + rnd() * 0.2), r * (0.9 + rnd() * 0.25)));
     crowns.setMatrixAt(i, m);
+    for (const [mesh, k] of [[sideA, 0], [sideB, 1]] as const) {
+      const a = rnd() * Math.PI * 2 + k * Math.PI;
+      const rs = r * (0.55 + rnd() * 0.15);
+      m.compose(new THREE.Vector3(s.x + Math.cos(a) * r * 0.6, trunkH + r * (0.45 + rnd() * 0.5), s.z + Math.sin(a) * r * 0.6), q, new THREE.Vector3(rs, rs * 0.85, rs));
+      mesh.setMatrixAt(i, m);
+    }
     color.setHSL(0.24 + rnd() * 0.07, 0.25 + rnd() * 0.2, 0.42 + rnd() * 0.22);
     crowns.setColorAt(i, color);
+    sideA.setColorAt(i, color);
+    sideB.setColorAt(i, color.offsetHSL(0, 0, -0.04));
     q.identity();
   });
-  for (const mesh of [trunks, crowns]) {
+  for (const mesh of [trunks, crowns, sideA, sideB]) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.computeBoundingSphere();
   }
   const g = new THREE.Group();
   g.name = 'trees';
-  g.add(trunks, crowns);
+  g.add(trunks, crowns, sideA, sideB);
   return g;
 }

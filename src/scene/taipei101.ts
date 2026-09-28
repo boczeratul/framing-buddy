@@ -20,15 +20,15 @@ export const T101 = {
 };
 
 /** 自建模型涵蓋範圍（相對塔心，東、北公尺）：塔身＋購物中心裙樓，Google 模型在此挖空 */
-export const TAIPEI101_FOOTPRINT: [number, number][] = [[-48, -48], [128, -48], [128, 122], [-48, 122]];
+export const TAIPEI101_FOOTPRINT: [number, number][] = [[-106, -40], [40, -40], [40, 106], [-106, 106]];
 
 /**
- * 裙樓（台北 101 購物中心）：塔位於基地西南角，商場呈 L 形環繞北側與東側
- * （整體約 147 × 138 m，高約 30 m）。輪廓為相對塔心（東、北公尺），從上方看逆時針。
+ * 裙樓（台北 101 購物中心）：依 Google 3D 俯視量測，商場呈 L 形位於塔的西側與北側，
+ * 塔身位於整個基地的東南角；西半部屋頂為大片玻璃弧形天窗。輪廓為相對塔心（東、北公尺），從上方看逆時針。
  */
 const PODIUM: { poly: [number, number][]; height: number }[] = [
-  { poly: [[116, 33], [116, 107], [-31, 107], [-31, 33]], height: 30 },
-  { poly: [[116, -31], [116, 33], [33, 33], [33, -31]], height: 30 },
+  { poly: [[-31, -24], [-31, 98], [-98, 98], [-98, -24]], height: 30 },
+  { poly: [[28, 31], [28, 98], [-31, 98], [-31, 31]], height: 30 },
 ];
 
 const NOTCH = 0.1;
@@ -286,6 +286,21 @@ export function buildTaipei101(): { group: THREE.Group } {
 
   // ---- 裙樓（購物中心）與地面 ----
   for (const p of PODIUM) buildPodium(b, p.poly, p.height);
+  // 西側商場的玻璃弧形天窗（南北向）
+  const vault = new THREE.CylinderGeometry(20, 20, 96, 32, 1, true, -Math.PI / 2, Math.PI);
+  vault.rotateX(Math.PI / 2);
+  vault.scale(1, 0.45, 1);
+  vault.translate(-64, 30, -37);
+  b.add(M.glass101, vault);
+  const ribs: THREE.BufferGeometry[] = [];
+  for (let k = 0; k <= 16; k++) {
+    const r = new THREE.TorusGeometry(20, 0.25, 4, 24, Math.PI);
+    r.rotateY(Math.PI / 2);
+    r.scale(1, 0.45, 1);
+    r.translate(-64, 30, -37 - 48 + k * 6);
+    ribs.push(r);
+  }
+  b.add(M.frame101, merge(ribs));
   const plate = new THREE.Shape(TAIPEI101_FOOTPRINT.map(([e, n]) => new THREE.Vector2(e, n)));
   const plateGeo = new THREE.ShapeGeometry(plate);
   plateGeo.rotateX(-Math.PI / 2);
@@ -308,10 +323,12 @@ function buildPodium(b: Batch, poly: [number, number][], height: number) {
     });
   const floors = 6;
   const fh = height / floors;
+  // 立面：米灰色石材層間帶＋每層一道玻璃窗帶
   for (let f = 0; f < floors; f++) {
     const y0 = f * fh;
-    b.add(f === 0 ? M.granite : M.glass101, loft([ring(0.4, y0), ring(0.4, y0 + fh - 0.9)], { uvScale: 4.2 }));
-    b.add(M.frame101, loft([ring(0, y0 + fh - 0.9), ring(0, y0 + fh)]));
+    if (f === 0) b.add(M.granite, loft([ring(0.2, y0), ring(0.2, y0 + fh - 1.2)]));
+    else b.add(M.glass101, loft([ring(0.5, y0), ring(0.5, y0 + fh * 0.55)], { uvScale: 4.2 }));
+    b.add(M.marbleShade, loft([ring(0, y0 + (f === 0 ? fh - 1.2 : fh * 0.55)), ring(0, y0 + fh)]));
   }
   b.add(M.frame101, loft([ring(0, height), ring(0, height + 1.4)]));
   b.add(M.frame101, loft([ring(0.6, height + 0.3), ring(0.6, height + 0.31)], { capTop: true }));
