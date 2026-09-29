@@ -33,6 +33,7 @@ npm run build                # 型別檢查＋打包到 dist/
 | 中正紀念堂園區 | 約 100 萬（原約 10 萬） | 琉璃瓦壟與瓦當、垂脊小獸、鴟吻、白色斗拱、內傾角樓、拱門線腳、匾額、御路國徽、細緻欄杆與斜坡扶手、藻井；牌樓五個半圓拱、抱鼓石、「自由廣場」匾；戲劇院／音樂廳紅柱、彩畫、重簷；圍牆八角窗 |
 | 台北 101 | 約 10 萬（原約 2,700） | 逐層玻璃帶與樓板凸緣、立面鰭板、四角雙重內凹、如意與雲紋、古錢幣、觀景台欄杆、階梯冠頂、分節塔尖、西北側 L 形商場與玻璃弧形天窗 |
 | 哈爾格林姆教堂（雷克雅維克） | 約 5.6 萬 | 依 OSM 126 個建物部件與照片：階梯狀玄武岩柱翼、塔身尖拱入口、細長窗、四面時鐘、百葉鐘樓、小尖塔組成的塔尖、中殿尖拱窗與扶壁、階梯山牆、盔形圓頂後殿；廣場鋸齒鋪面、萊夫·艾瑞克森像、旗杆、**東北草坪上的五座星形鞦韆** |
+| 羅森堡宮（哥本哈根） | 約 5.4 萬 | 依 OSM 3D 建物部件（各塔高度、屋頂形式）與 Trap Danmark 建築描述：紅磚與砂岩腰線、長立面 14 開間十字窗（三角山花頭像）、荷蘭式渦卷山牆、端牆砂岩凸窗、七層大塔與三層開放燈籠亭銅尖頂、東北側兩座樓梯塔與八角梯塔、銅板屋面與老虎窗、12 尊青銅胸像；護城河與護岸、格林橋、門柱與兩尊臥獅 |
 | 新港（哥本哈根） | 約 19 萬 | 依 OSM／Overture 51 棟建物輪廓與門牌、照片與保存建築資料：北岸 1–71 號與南岸 4–44 號逐棟立面色、層數、開間、門與地下室入口、老虎窗與山牆式 kvist、陶瓦／黑釉瓦／石板屋頂、煙囪；鵝卵石碼頭、花崗岩駁岸、遮陽篷與露天座位、繫船柱、路燈；紀念錨、新港橋、23 艘木造帆船與燈塔船 |
 
 - 自建模型只在地標進入近景範圍時出現；離開後由 Google 模型呈現。自建模型的底座高度會對齊周圍的 Google 地面。
@@ -106,7 +107,7 @@ src/
     mountains.ts          精細山體（DEM 網格、季節雪線、自身陰影、高海拔日照）
     peaks.ts              山峰目標（向量圖磚 mountain_peak）
     season.ts             雪線、林線估算
-    landmarks.ts          地標手工模型圖層（中正紀念堂、台北 101）
+    landmarks.ts          地標手工模型圖層（中正紀念堂、台北 101、哈爾格林姆教堂、羅森堡宮）
     presets.ts            快速位置
     osm/
       OsmLayer.ts         依視野動態載入／釋放圖磚（Google 模式只取有名稱的高樓當目標）
@@ -118,7 +119,7 @@ src/
   scene/
     environment.ts        太陽／月亮、天空、陰影、霧、夜間燈光、自動曝光與測光
     ringmask.ts           近／遠景交界的 shader 裁切
-    cks.ts, taipei101.ts, hallgrimskirkja.ts  地標精細模型
+    cks.ts, taipei101.ts, hallgrimskirkja.ts, rosenborg.ts  地標精細模型
     nyhavn*.ts            新港：平面資料（scripts/nyhavn/extract.py 產生）、逐棟規格、材質、建模
     regionmask.ts         自建模型接手範圍：挖空 Google 圖磚（畫面、陰影、射線）
     geometry.ts, materials.ts, trees.ts
@@ -128,4 +129,10 @@ src/
     googlemap.ts          Google 地圖面板
     mapview.ts            俯視／立體視圖
   ui/panel.ts             控制面板
+tools/
+  landmark.mjs            以無頭瀏覽器匯出地標 GLB（給 Unity 版）或產生預覽圖
 ```
+
+匯出地標 GLB（Unity 版 `Assets/FramingBuddy/Landmarks/` 使用）：`npm run landmark -- export rosenborg rosenborg.glb`。
+預覽：`npm run landmark -- preview rosenborg views.json out/`（views.json 為 `[{"name", "eye": [x,y,z], "target": [x,y,z], "fov"}]`）。
+第一次使用需安裝瀏覽器：`npx playwright install chromium`。
