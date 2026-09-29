@@ -3,11 +3,12 @@ import { distanceLatLon, toLocal, offsetLatLon, type LatLon } from '../geo';
 import { buildCKS, CKS_ANCHOR, CKS_EXCLUSION, HALL, localToSite, type Floor } from '../scene/cks';
 import { buildTaipei101, T101, TAIPEI101_FOOTPRINT } from '../scene/taipei101';
 import { buildHallgrimskirkja, HALLGRIMS_ANCHOR, HALLGRIMS_MASK, HALLGRIMS } from '../scene/hallgrimskirkja';
+import { buildRosenborg, ROSENBORG, ROSENBORG_ANCHOR, ROSENBORG_MASK } from '../scene/rosenborg';
 import { LANDMARKS } from '../scene/landmarks';
 import { pointInRing } from './osm/parse';
 import type { MapLabel, Target } from './types';
 
-// 地標：自建的精細模型（中正紀念堂園區、台北 101、哈爾格林姆教堂）。
+// 地標：自建的精細模型（中正紀念堂園區、台北 101、哈爾格林姆教堂、羅森堡宮）。
 // - 有 Google 圖磚時：地標進入近景範圍才換成自建模型，並把該區域的 Google 模型挖掉；
 //   遠離時隱藏，由 Google 模型呈現。
 // - 沒有 Google 時：可視範圍內一律顯示自建模型。
@@ -112,6 +113,18 @@ export const LANDMARK_DEFS: LandmarkDef[] = [
     targets: [{ id: 'hallgrimskirkja', label: '哈爾格林姆教堂', top: HALLGRIMS.towerTop, aimAt: 0.55, radius: 30 }],
     create() {
       const m = buildHallgrimskirkja();
+      return { group: m.group, solids: [m.group], labels: m.labels };
+    },
+  },
+  {
+    id: 'rosenborg',
+    name: '羅森堡宮',
+    anchor: ROSENBORG_ANCHOR,
+    radius: 100,
+    exclusion: ROSENBORG_MASK,
+    targets: [{ id: 'rosenborg', label: '羅森堡宮', top: ROSENBORG.towerTop, aimAt: 0.4, radius: 26 }],
+    create() {
+      const m = buildRosenborg();
       return { group: m.group, solids: [m.group], labels: m.labels };
     },
   },
