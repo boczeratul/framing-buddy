@@ -1,9 +1,10 @@
 import { CKS_PRESETS } from '../scene/cks';
 import { hallgrimsLatLon } from '../scene/hallgrimskirkja';
 import { ROSENBORG_PRESETS } from '../scene/rosenborg';
+import { NYHAVN_PRESETS } from '../scene/nyhavn';
 import type { Preset } from './types';
 
-// 快速位置：有自建精細模型的地標（中正紀念堂、哈爾格林姆教堂）用精確點位，
+// 快速位置：有自建精細模型的地標（中正紀念堂、哈爾格林姆教堂、羅森堡宮、新港）用精確點位，
 // 其他世界知名拍攝點為概略座標，可再微調。
 
 const hg = (name: string, a: number, c: number, extra: Omit<Preset, 'name' | 'group' | 'lat' | 'lon'> = {}): Preset => ({
@@ -41,6 +42,7 @@ export const PRESETS: Preset[] = [
   hg('教堂正門前', 16, 0, { height: 1.4, aim: 'hallgrimskirkja', state: { focal: 14, portrait: true } }),
   hg('Skólavörðustígur 街上（望向教堂，約略位置）', 300, 0, { aim: 'hallgrimskirkja', state: { focal: 85, portrait: true } }),
   ...ROSENBORG_PRESETS,
+  ...NYHAVN_PRESETS,
   ...FUJI,
   { group: '世界拍攝點', name: '台北・象山六巨石（望向台北 101）', lat: 25.02745, lon: 121.57635, aim: 'taipei101', state: { focal: 35 } },
   { group: '世界拍攝點', name: '巴黎・夏樂宮人權廣場（艾菲爾鐵塔）', lat: 48.86185, lon: 2.28875, state: { azimuth: 128, pitch: 8, focal: 35 } },
